@@ -120,7 +120,10 @@ class _LeafHomeState extends State<LeafHome> {
   void _message(browser.MessageEvent event) {
     final plan = _plan;
     if (!_awaitingHelper || plan == null || _token == null) return;
-    if (event.origin != _sourceOrigin || event.source != _readerWindow) return;
+    // Send the job only to the window Leaf opened, with exact target origin.
+    // Cross-origin WindowBase wrappers are not reliably identity-equal in Dart.
+    // All subsequent chapter payloads must also present the session token.
+    if (event.origin != _sourceOrigin || _readerWindow == null) return;
     if (event.data is! String) return;
     late final Map<String, dynamic> data;
     try {
