@@ -12,6 +12,7 @@ const report = { site: SITE, started: new Date().toISOString(), scenarios: [], d
 const browsers = [];
 const contexts = [];
 const epubExpectations = [];
+const touchPages = new WeakSet();
 let activePage;
 let activeScenario = 'initialization';
 const assert = (condition, message) => { if (!condition) throw new Error(message); };
@@ -36,6 +37,7 @@ async function newPage(browser, label, options = {}) {
   contexts.push({ context, label });
   await context.tracing.start({ screenshots: true, snapshots: true });
   const page = await context.newPage();
+  if (options.hasTouch) touchPages.add(page);
   activePage = page;
   page.setDefaultTimeout(20000);
   const runtimeErrors = [];
@@ -64,8 +66,36 @@ async function enableAccessibility(page) {
   await page.waitForSelector('flutter-view, flt-glass-pane', { state: 'attached', timeout: 60000 });
   await page.waitForFunction(() => document.querySelector('flt-semantics-placeholder') ||
     document.querySelector('flt-semantics [role="textbox"]'), null, { timeout: 45000 });
-  await page.evaluate(() => document.querySelector('flt-semantics-placeholder')?.click());
+  const placeholder = page.locator('flt-semantics-placeholder');
+  if (await placeholder.count()) {
+    const bounds = await placeholder.boundingBox();
+    if (touchPages.has(page) && bounds && bounds.width > 2 && bounds.height > 2) {
+      // Flutter MobileSemanticsEnabler recognizes the screen-reader gesture
+      // at the element centre. HTMLElement.click() has no touch coordinates
+      // and does not activate semantics on Android Chromium. In the actual
+      // Flutter DOM the placeholder sits behind the full-page flutter-view;
+      // its global pointer handler recognizes the centred touch on that view.
+      // Use a normal rendered-view tap, without forced actions or coordinates.
+      await page.locator('flutter-view').first().tap({ timeout: 15000 });
+    } else {
+      // The desktop assistive-technology button intentionally sits outside
+      // the viewport. Activate that public control, without changing Flutter
+      // internals or injecting application state.
+      await placeholder.evaluate(element => element.click());
+    }
+  }
   await page.getByRole('textbox', { name: /Search books/i }).waitFor({ state: 'visible', timeout: 45000 });
+}
+
+async function renderedInput(page, input, value) {
+  await input.fill(value);
+  // A controlled Flutter field processes its DOM editing event before the
+  // next render. Do not send Enter in the same event burst (the failed trace
+  // submitted Cyrillic text just 7 ms after fill). Wait for the rendered field
+  // and then use the visible Search action, as a user can on any keyboard.
+  await page.evaluate(() => new Promise(resolve =>
+    requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  assert(await input.inputValue() === value, 'The rendered search field did not retain the entered text.');
 }
 
 async function openHome(page) {
@@ -210,17 +240,19 @@ async function verifyDownload(download, filename, expected) {
 
 async function search(page, language, query, title) {
   const input = page.getByRole('textbox', { name: /Search books/i });
-  await input.fill('');
-  await input.press('Enter');
+  const searchButton = page.getByRole('button', { name: 'Search books', exact: true });
+  await renderedInput(page, input, '');
+  await searchButton.click();
   await page.getByText('Start with a good story', { exact: true }).waitFor();
   await clickLabel(page, language);
-  await input.fill(query);
-  const request = page.waitForRequest(request => {
-    const url = new URL(request.url());
-    return url.searchParams.get('action') === 'query' && (url.searchParams.get('srsearch') || '').startsWith(query);
-  }, { timeout: 15000 });
-  await input.press('Enter');
-  await request;
+  await renderedInput(page, input, query);
+  await Promise.all([
+    page.waitForRequest(request => {
+      const url = new URL(request.url());
+      return url.searchParams.get('action') === 'query' && (url.searchParams.get('srsearch') || '').startsWith(query);
+    }, { timeout: 15000 }),
+    searchButton.click(),
+  ]);
   await page.getByText('Search results', { exact: true }).waitFor({ timeout: 40000 });
   await bookButton(page, title).waitFor({ state: 'visible' });
   const fallbackMessages = await page.getByText(/search is (?:busy|unavailable)|Search took too long|catalogue returned|Full-text search is busy/i).allTextContents();

@@ -533,6 +533,8 @@ class _LeafHomeState extends State<LeafHome> {
         _receivedUrls.add(url.removeFragment());
         if (mounted)
           setState(() {
+            _epub = null;
+            _bookReady = false;
             _done = _chapters.length;
             _status = 'Received ' + _done.toString() + ' chapters…';
           });
@@ -712,7 +714,8 @@ class _LeafHomeState extends State<LeafHome> {
           _bookReady = true;
           _awaitingHelper = false;
           _status = '${partial ? 'Partial EPUB' : 'EPUB'} ready: '
-              '${chapters.length} reading sections (${(bytes.length / 1024).round()} KB). '
+              '${chapters.length} reading ${chapters.length == 1 ? 'section' : 'sections'} '
+              '(${(bytes.length / 1024).round()} KB). '
               '${_isPhone ? 'Tap Save EPUB to keep it or open it in your reader.' : 'Your download is ready.'}';
         });
       await _saveCheckpoint();
@@ -791,11 +794,23 @@ class _LeafHomeState extends State<LeafHome> {
 
   Future<void> _import() async {
     if (_busy) return;
+    final request = _run;
     try {
       final result = await LocalImporter.chooseBook();
-      if (result.chapters.isEmpty) return;
+      if (!mounted || request != _run || _busy || result.chapters.isEmpty)
+        return;
+      ++_run;
+      _detachCapture();
       if (mounted)
         setState(() {
+          _epub = null;
+          _bookReady = false;
+          _chapters = [];
+          _directUrls = [];
+          _receivedUrls = [];
+          _done = 0;
+          _total = 0;
+          _selectionComplete = false;
           _imported = List.of(result.chapters);
           _importedComplete = result.complete;
           _importedExpected = result.expectedChapters;
@@ -1275,6 +1290,7 @@ class _LeafHomeState extends State<LeafHome> {
     final direct = book.kind == CatalogueBookKind.directEpub;
     return Semantics(
         button: true,
+        enabled: !_busy && !_restoring,
         label: '${direct ? 'Download' : 'Prepare'} EPUB: ${book.title}',
         child: Material(
           color: Colors.white,
@@ -1764,6 +1780,14 @@ class _LeafHomeState extends State<LeafHome> {
       onChanged: (v) {
         if (c == _first || c == _last) {
           setState(() => _mobilePrepared = false);
+        }
+        if ((c == _title || c == _author) && _bookReady) {
+          setState(() {
+            _bookReady = false;
+            _epub = null;
+            _status =
+                'Book details changed. Create the EPUB again to update it.';
+          });
         }
       },
       minLines: 1,

@@ -94,7 +94,7 @@ For source-tab capture, the receiver checks the session token, source origin, se
 - Complete Dart suite: 63 tests passed at integration checkpoint, covering discovery, source search/fallback, imports, URL planning, bookmarklet encoding, EPUB XML/metadata and content extraction.
 - Collector regressions: 15 passed, including compilation of the actual production-generated generic/personalized bookmarklet URLs.
 - Flutter release web build: passed at integration checkpoint.
-- W3C EPUBCheck 5.4.0: production-generated English and Russian fixtures each produced zero errors and zero warnings.
+- W3C EPUBCheck 5.4.0: production-generated English and Russian fixtures, plus the actual browser-downloaded Alice (13 sections) and Onegin (one full-text section), each produced zero errors and zero warnings.
 - The desktop/mobile workflow builds this exact branch before running its browser scenarios and retains downloadable EPUBs, screenshots and a structured report. Consult the workflow run for its final result; the existence of the test script is not itself a passing browser result.
 
 Official EPUBCheck release: https://github.com/w3c/epubcheck/releases/tag/v5.4.0 . Downloaded release ZIP SHA256 verified as `33350c61038e71dfb3d45a76aed04bf5481e6d5500cb780f6e98db8bbd15a28c`.
