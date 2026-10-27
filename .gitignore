@@ -1,0 +1,11 @@
+.venv/
+upstream/
+exports/
+__pycache__/
+.pytest_cache/
+.dart_tool/
+flutter_app/build/
+flutter_app/.flutter-plugins*
+flutter_app/.metadata
+flutter_app/.packages
+flutter_app/pubspec.lock

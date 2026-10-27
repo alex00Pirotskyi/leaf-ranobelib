@@ -1,0 +1,15 @@
+services:
+  leaf:
+    build: .
+    ports:
+      # Local/private by default. Put an HTTPS proxy in front for phone access.
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - leaf_exports:/app/exports
+      # Persist upstream cache so repeat downloads don't fetch again:
+      - leaf_cache:/opt/ranobelib-downloader/data
+    restart: unless-stopped
+
+volumes:
+  leaf_exports:
+  leaf_cache:
