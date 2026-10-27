@@ -97,6 +97,7 @@ class _LeafHomeState extends State<LeafHome> {
   List<BookChapter> _chapters = [], _imported = [];
   int _done = 0, _total = 0;
   bool _mobilePrepared = false;
+  String? _cachedCaptureSource;
   bool get _isIPhoneSafari => RegExp(r'iPhone|iPad|iPod').hasMatch(browser.window.navigator.userAgent);
   bool get _mobileNeedsCapture {
     final uri = Uri.tryParse(_first.text.trim());
@@ -107,6 +108,7 @@ class _LeafHomeState extends State<LeafHome> {
   void initState() {
     super.initState();
     _messages = browser.window.onMessage.listen(_message);
+    unawaited(_loadCaptureSource());
   }
 
   @override
@@ -221,6 +223,7 @@ class _LeafHomeState extends State<LeafHome> {
           'open the first chapter and activate it there. Import the saved '
           'JSON into Leaf to make an EPUB.';
       });
+      if (_cachedCaptureSource != null) unawaited(_prepareSafariCapture());
       return;
     }
     setState(() {
@@ -389,6 +392,19 @@ class _LeafHomeState extends State<LeafHome> {
     }
   }
 
+  Future<void> _loadCaptureSource() async {
+    try {
+      final response = await http.get(Uri.base.resolve('leaf-capture.js'))
+          .timeout(const Duration(seconds: 20));
+      if (response.statusCode != 200) return;
+      final source = utf8.decode(response.bodyBytes);
+      if (!source.contains('leafCaptureV2') || source.length > 90000) return;
+      if (mounted) setState(() => _cachedCaptureSource = source);
+    } catch (_) {
+      // The public-domain direct EPUB route still works without a bookmarklet.
+    }
+  }
+
   Future<void> _prepareSafariCapture() async {
     late final ChapterUrlPlan plan;
     try {
@@ -400,15 +416,10 @@ class _LeafHomeState extends State<LeafHome> {
         _status = 'Preparing your Safari chapter collector…';
         _error = null;
       });
-      final response = await http.get(Uri.base.resolve('leaf-capture.js'))
-          .timeout(const Duration(seconds: 20));
-      if (response.statusCode != 200) {
-        throw FormatException('Cannot load chapter helper (HTTP ' +
-            response.statusCode.toString() + ').');
-      }
-      final source = utf8.decode(response.bodyBytes);
-      if (!source.contains('leafCaptureV2') || source.length > 90000) {
-        throw const FormatException('Unexpected chapter collector source.');
+      final source = _cachedCaptureSource;
+      if (source == null) {
+        throw const FormatException('Safari helper is still loading. '
+            'Reload Leaf and tap Copy personalized Safari helper again.');
       }
       final job = jsonEncode({
         'token': _createToken(),
@@ -654,8 +665,12 @@ class _LeafHomeState extends State<LeafHome> {
         style:TextStyle(color:muted,fontSize:12,height:1.55)),
       const SizedBox(height:13),
       SizedBox(width:double.infinity,child:_button(
-        'Copy personalized Safari helper',
-        Icons.copy_rounded,()=>unawaited(_prepareSafariCapture()))),
+        _cachedCaptureSource == null
+          ? 'Loading Safari helper…'
+          : 'Copy personalized Safari helper',
+        Icons.copy_rounded,
+        _cachedCaptureSource == null ? null
+          : () => unawaited(_prepareSafariCapture()))),
       const SizedBox(height:17),
       const Text('2. Open the first chapter and run Leaf Capture',
         style:TextStyle(color:ink,fontSize:13,fontWeight:FontWeight.w700)),
