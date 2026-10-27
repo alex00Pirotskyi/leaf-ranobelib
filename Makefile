@@ -98,20 +98,20 @@ github-rename-pages: ## Rename repo to enable https://username.github.io/ (requi
 
 pages-enable: ## Enable GitHub Pages via GitHub CLI and trigger deployment
 	@gh auth status >/dev/null 2>&1 || { echo "Run: gh auth login"; exit 1; }
-	@REPO=$(gh repo view --json nameWithOwner --jq .nameWithOwner) && \
+	@REPO="$(GITHUB_OWNER)/$(PAGES_REPO)" && \
 		if gh api "repos/$REPO/pages" >/dev/null 2>&1; then \
 			gh api -X PUT "repos/$REPO/pages" -f build_type=workflow >/dev/null; \
 		else \
 			gh api -X POST "repos/$REPO/pages" -f build_type=workflow >/dev/null; \
 		fi
-	@gh workflow run pages.yml
-	@echo "Pages enabled. Track: gh run list --workflow pages.yml --limit 1"
+	@gh workflow run pages.yml --repo "$(GITHUB_OWNER)/$(PAGES_REPO)" --ref main
+	@echo "Pages enabled. Track: gh run list --repo $(GITHUB_OWNER)/$(PAGES_REPO) --workflow pages.yml --limit 1"
 
 publish-pages: github-rename-pages pages-enable ## Rename, enable Pages, trigger Flutter deployment
 
 pages-api-url: ## Set GitHub Actions variable; e.g. make pages-api-url LEAF_API_URL=https://my-api.onrender.com
 	@test -n "$(LEAF_API_URL)" || { echo "Missing LEAF_API_URL=https://your-backend.onrender.com"; exit 1; }
-	@gh variable set LEAF_API_URL --body "$(LEAF_API_URL)" --repo "$(gh repo view --json nameWithOwner --jq .nameWithOwner)"
+	@gh variable set LEAF_API_URL --body "$(LEAF_API_URL)" --repo "$(GITHUB_OWNER)/$(PAGES_REPO)"
 
 pages-open: ## Open the root Pages address
 	@echo "https://$(shell echo $(GITHUB_OWNER) | tr '[:upper:]' '[:lower:]').github.io/"
