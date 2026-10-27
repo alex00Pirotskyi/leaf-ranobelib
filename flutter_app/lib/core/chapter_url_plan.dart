@@ -29,8 +29,8 @@ class ChapterUrlPlan {
     if (a.origin != b.origin) {
       throw const FormatException('Start and end must be on the same website.');
     }
-    final start = a.replace(fragment: '');
-    final end = b.replace(fragment: '');
+    final start = a.replace(fragment: null);
+    final end = b.replace(fragment: null);
     if (start == end) {
       return ChapterUrlPlan._(start: start, end: end, urls: [start],
         inferred: true, description: 'One chapter');
@@ -124,5 +124,5 @@ class ChapterUrlPlan {
   /// exact original website.
   bool contains(Uri url) =>
       url.origin == start.origin &&
-      (inferred ? urls.contains(url.replace(fragment: '')) : true);
+      (inferred ? urls.contains(url.replace(fragment: null)) : true);
 }
