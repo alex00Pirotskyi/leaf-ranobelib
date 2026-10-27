@@ -5,7 +5,7 @@ services:
     name: leaf-ranobelib-api
     runtime: docker
     plan: starter
-    dockerfilePath: ./Dockerfile
+    dockerfilePath: ./Dockerfile.api
     dockerContext: .
     healthCheckPath: /api/health
     envVars:
