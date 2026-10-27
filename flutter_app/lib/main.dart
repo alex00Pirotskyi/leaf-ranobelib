@@ -1,57 +1,75 @@
-// Leaf — Flutter Web-only EPUB maker. No server, API keys, or Python.
+// Leaf: Flutter Web + Dart EPUB. Public API directly, other sites via user bookmarklet.
 import 'dart:async';
+import 'dart:convert';
 import 'dart:html' as browser;
+import 'dart:math';
 import 'dart:typed_data';
+import 'dart:ui_web' as ui_web;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-
+import 'core/chapter_url_plan.dart';
 import 'core/epub_builder.dart';
 import 'core/local_importer.dart';
-import 'core/ranobe_client.dart';
+import 'core/open_reader.dart';
 
-const _paper = Color(0xFFF8F7F2);
-const _ink = Color(0xFF2B352F);
-const _green = Color(0xFF3D634F);
-const _muted = Color(0xFF788279);
-const _line = Color(0xFFE2E6DD);
-const _originalUrl =
-    'https://ranobelib.me/ru/book/202399--okiraku-ryoushu-no-tanoshii-ryouchi-bouei-seisan-kei-majutsu-de-na-mo-naki-mura-wo-saikyou-no-jousai-toshi-ni';
+const paper = Color(0xFFF8F7F2), ink = Color(0xFF28382F);
+const pine = Color(0xFF3C5F4A), muted = Color(0xFF78817A);
+const line = Color(0xFFE3E7DF);
+const demoStart = 'https://en.wikisource.org/wiki/Pride_and_Prejudice_(1817)/Chapter_1';
+const demoEnd = 'https://en.wikisource.org/wiki/Pride_and_Prejudice_(1817)/Chapter_3';
+const bookmarklet = 'javascript:(function(){'
+    'if(window.__leafCaptureV2){window.__leafCaptureV2.resume();return;}'
+    'var s=document.createElement("script");'
+    's.src="https://alex00pirotskyi.github.io/leaf-ranobelib/leaf-capture.js";'
+    '(document.head||document.documentElement).appendChild(s);'
+    '})()';
 
-void main() => runApp(const LeafApp());
+void main() {
+  ui_web.platformViewRegistry.registerViewFactory('leaf-bookmarklet', (int id) {
+    final a = browser.AnchorElement(href: bookmarklet)
+      ..text = 'Drag Leaf Capture to bookmarks bar ↗'
+      ..title = 'Drag this link into the bookmarks bar, once.'
+      ..style.cssText = 'display:flex;align-items:center;justify-content:center;'
+          'width:100%;height:42px;box-sizing:border-box;'
+          'border:1px dashed #799181;border-radius:10px;'
+          'background:#f4faf2;color:#3C5F4A;text-decoration:none;'
+          'font:bold 12px Arial,sans-serif;cursor:grab';
+    a.onClick.listen((event) => event.preventDefault());
+    return a;
+  });
+  runApp(const LeafApp());
+}
 
 class LeafApp extends StatelessWidget {
   const LeafApp({super.key});
-
   @override
   Widget build(BuildContext context) => MaterialApp(
+    title: 'leaf. — Read anywhere',
     debugShowCheckedModeBanner: false,
-    title: 'Leaf — Your books, offline',
     theme: ThemeData(
       useMaterial3: true,
-      scaffoldBackgroundColor: _paper,
-      colorScheme: ColorScheme.fromSeed(seedColor: _green, surface: _paper),
+      scaffoldBackgroundColor: paper,
+      colorScheme: ColorScheme.fromSeed(seedColor: pine, surface: paper),
       inputDecorationTheme: InputDecorationTheme(
-        filled: true,
-        fillColor: Colors.white,
-        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+        filled: true, fillColor: Colors.white,
+        contentPadding: const EdgeInsets.symmetric(horizontal: 15, vertical: 15),
         enabledBorder: OutlineInputBorder(
-          borderSide: const BorderSide(color: _line),
-          borderRadius: BorderRadius.circular(12),
+          borderSide: const BorderSide(color: line),
+          borderRadius: BorderRadius.circular(11),
         ),
         focusedBorder: OutlineInputBorder(
-          borderSide: const BorderSide(color: _green, width: 1.6),
-          borderRadius: BorderRadius.circular(12),
+          borderSide: const BorderSide(color: pine, width: 1.6),
+          borderRadius: BorderRadius.circular(11),
         ),
-        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(11)),
       ),
     ),
     home: const LeafHome(),
   );
 }
 
-enum InputMode { link, files }
-enum ChapterMode { all, latest, range }
+enum Mode { links, files }
 
 class LeafHome extends StatefulWidget {
   const LeafHome({super.key});
@@ -60,511 +78,509 @@ class LeafHome extends StatefulWidget {
 }
 
 class _LeafHomeState extends State<LeafHome> {
-  final RanobeClient _client = RanobeClient();
-  final TextEditingController _url = TextEditingController(text: _originalUrl);
-  final TextEditingController _title = TextEditingController(text: 'My offline book');
-  final TextEditingController _author = TextEditingController(text: '');
-  final TextEditingController _from = TextEditingController(text: '1');
-  final TextEditingController _to = TextEditingController();
+  final _first = TextEditingController(text: demoStart);
+  final _last = TextEditingController(text: demoEnd);
+  final _title = TextEditingController(text: 'Pride and Prejudice');
+  final _author = TextEditingController(text: 'Jane Austen');
+  final _reader = OpenReader();
+  Mode _mode = Mode.links;
+  bool _busy = false, _cancelled = false, _awaitingHelper = false;
+  bool _bookReady = false;
+  String _status = 'Ready — try the public-domain three-chapter demo.';
+  String? _error;
+  ChapterUrlPlan? _plan;
+  String? _token, _sourceOrigin;
+  browser.WindowBase? _readerWindow;
+  StreamSubscription<browser.MessageEvent>? _messages;
+  Uint8List? _epub;
+  List<BookChapter> _chapters = [], _imported = [];
+  int _done = 0, _total = 0;
 
-  InputMode _mode = InputMode.files;
-  ChapterMode _chapterMode = ChapterMode.all;
-  Novel? _novel;
-  List<BookChapter> _imported = [];
-  String _branch = 'auto';
-  String? _notice;
-  bool _busy = false;
-  bool _cancelRequested = false;
-  int _progress = 0;
-  int _total = 0;
-  String _stage = '';
+  @override
+  void initState() {
+    super.initState();
+    _messages = browser.window.onMessage.listen(_message);
+  }
 
   @override
   void dispose() {
-    _client.close();
-    _url.dispose();
-    _title.dispose();
-    _author.dispose();
-    _from.dispose();
-    _to.dispose();
+    _messages?.cancel();
+    _reader.close();
+    _first.dispose(); _last.dispose(); _title.dispose(); _author.dispose();
     super.dispose();
   }
 
-  int get _chapterCount => _novel == null
-      ? 0 : _client.chaptersFor(_novel!, _branch).length;
+  String _createToken() {
+    final rng = Random.secure();
+    return List.generate(24, (_) => rng.nextInt(256).toRadixString(16).padLeft(2, '0'))
+      .join();
+  }
 
-  Future<void> _inspect() async {
-    if (_busy) return;
-    setState(() { _busy = true; _notice = null; _stage = 'Looking up book…'; });
+  void _message(browser.MessageEvent event) {
+    final plan = _plan;
+    if (!_awaitingHelper || plan == null || _token == null) return;
+    if (event.origin != _sourceOrigin || event.source != _readerWindow) return;
+    if (event.data is! String) return;
+    late final Map<String, dynamic> data;
     try {
-      final book = await _client.inspect(_url.text.trim());
-      if (!mounted) return;
-      setState(() {
-        _novel = book;
-        _branch = 'auto';
-        _title.text = book.title;
-        _author.text = book.author;
-        _from.text = '1';
-        _to.text = book.chapters.length.toString();
-        _notice = 'Found ' + book.chapters.length.toString() + ' public chapters.';
-      });
-    } catch (error) {
-      if (mounted) setState(() { _novel = null; _notice = _errorText(error); });
-    } finally {
-      if (mounted) setState(() { _busy = false; _stage = ''; });
+      data = Map<String, dynamic>.from(jsonDecode(event.data as String) as Map);
+    } catch (_) { return; }
+    if (data['leaf'] != 2) return;
+    if (data['type'] == 'hello') {
+      final pageUrl = (data['pageUrl'] ?? '').toString();
+      final proposed = Uri.tryParse(pageUrl);
+      final resumeUrl = !plan.inferred && proposed != null &&
+              proposed.origin == plan.start.origin
+          ? proposed.toString() : plan.start.toString();
+      final config = {
+        'leaf':2, 'type':'job', 'token':_token,
+        'start':resumeUrl, 'end':plan.end.toString(),
+        'urls':plan.urls.map((u)=>u.toString()).toList(),
+        'max':plan.inferred ? plan.urls.length : ChapterUrlPlan.maxChapters,
+        'title':_title.text, 'resumeFrom':_chapters.length,
+      };
+      try {
+        _readerWindow?.postMessage(jsonEncode(config), plan.start.origin);
+        if (mounted) setState(() => _status = 'Capture connected. Reading chapters…');
+      } catch (_) {
+        if (mounted) setState(() => _error =
+            'The website disconnected the tab (COOP). Use manual JSON export and import.');
+      }
+      return;
     }
+    if (data['token'] != _token) return;
+    switch (data['type']) {
+      case 'status':
+        if (mounted) setState(() => _status = (data['note'] ?? '').toString());
+      case 'chapter':
+        final i = data['index'];
+        final url = Uri.tryParse((data['url'] ?? '').toString());
+        final title = (data['title'] ?? '').toString();
+        final html = (data['html'] ?? '').toString();
+        if (i is! int || i != _chapters.length || url == null ||
+            !plan.contains(url) || title.length > 300 ||
+            html.length < 15 || html.length > 650000) return;
+        if (plan.inferred && (i >= plan.urls.length || plan.urls[i] != url)) return;
+        _chapters.add(BookChapter(
+          title.isEmpty ? 'Chapter ' + (i+1).toString() : title, html));
+        if (mounted) setState(() {
+          _done = _chapters.length;
+          _status = 'Received ' + _done.toString() + ' chapters…';
+        });
+      case 'halt':
+        if (mounted) setState(() {
+          _busy = false;
+          _status = 'Paused after ' + _done.toString() + ' chapters.';
+          _error = (data['note'] ?? 'The reader stopped.').toString();
+        });
+      case 'done':
+        if (_chapters.isEmpty) return;
+        if (plan.inferred && _chapters.length != plan.urls.length) {
+          if (mounted) setState(() => _error =
+            'Some chapters are missing. Resume, or save a partial EPUB.');
+          return;
+        }
+        _awaitingHelper = false;
+        _busy = false;
+        unawaited(_createEpub());
+    }
+  }
+
+  void _start() {
+    if (_busy) return;
+    late final ChapterUrlPlan plan;
+    try {
+      plan = ChapterUrlPlan.parse(_first.text, _last.text);
+    } catch (e) {
+      setState(() => _error = _errorText(e)); return;
+    }
+    setState(() {
+      _plan = plan; _epub = null; _bookReady = false;
+      _chapters = []; _done = 0;
+      _total = plan.inferred ? plan.urls.length : ChapterUrlPlan.maxChapters;
+      _error = null; _cancelled = false;
+      _busy = true; _awaitingHelper = false;
+      _status = plan.description;
+    });
+    if (plan.isWikimedia && plan.inferred) {
+      unawaited(_readOpenApi(plan));
+      return;
+    }
+    // Open synchronously in the user's click gesture, before any await.
+    _token = _createToken();
+    _sourceOrigin = plan.start.origin;
+    _readerWindow = browser.window.open(
+      plan.start.toString(), 'leaf-chapter-source');
+    if (_readerWindow == null) {
+      setState(() {
+        _busy = false;
+        _error = 'Browser blocked the chapter tab. Allow pop-ups and try again.';
+      });
+      return;
+    }
+    setState(() {
+      _awaitingHelper = true;
+      _status = 'Reader tab opened. Solve any login or CAPTCHA yourself, '
+        'then click your Leaf Capture bookmark inside that tab.';
+    });
+  }
+
+  Future<void> _readOpenApi(ChapterUrlPlan plan) async {
+    try {
+      for (var i=0;i<plan.urls.length;i++) {
+        if (_cancelled) throw const FormatException('Canceled.');
+        final chapter = await _reader.read(plan.urls[i]);
+        if (_cancelled) throw const FormatException('Canceled.');
+        _chapters.add(chapter);
+        if (mounted) setState(() {
+          _done = _chapters.length;
+          _status = 'Fetched ' + _done.toString() + ' / ' + _total.toString();
+        });
+        if (i+1<plan.urls.length) {
+          await Future<void>.delayed(const Duration(milliseconds: 400));
+        }
+      }
+      await _createEpub();
+    } catch(e) {
+      if (mounted) setState(() {
+        _busy = false; _error = _errorText(e);
+        _status = 'Stopped; any collected chapters can still be saved.';
+      });
+    }
+  }
+
+  Future<void> _createEpub() async {
+    if (_chapters.isEmpty) {
+      if (mounted) setState(() => _error = 'Nothing to convert yet.');
+      return;
+    }
+    try {
+      if (mounted) setState(() => _status = 'Packaging EPUB in Dart…');
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+      final bytes = EpubBuilder.build(
+        title: _title.text.isEmpty ? 'Collected chapters' : _title.text,
+        author: _author.text, chapters: _chapters);
+      _epub = bytes;
+      if (mounted) setState(() {
+        _busy = false; _bookReady = true; _awaitingHelper = false;
+        _status = 'EPUB created: ' + _chapters.length.toString() + ' chapters (' +
+            (bytes.length / 1024).round().toString() + ' KB).';
+      });
+      _download();
+    } catch(e) {
+      if (mounted) setState(() { _busy = false; _error = _errorText(e); });
+    }
+  }
+
+  void _download() {
+    if (_epub == null) return;
+    final blob = browser.Blob([_epub!], 'application/epub+zip');
+    final url = browser.Url.createObjectUrlFromBlob(blob);
+    final link = browser.AnchorElement(href:url)
+      ..download = EpubBuilder.safeFilename(_title.text)
+      ..style.display = 'none';
+    browser.document.body?.append(link);
+    link.click();link.remove();
+    Future<void>.delayed(const Duration(seconds: 10),
+      ()=>browser.Url.revokeObjectUrl(url));
   }
 
   Future<void> _import() async {
     if (_busy) return;
-    setState(() { _notice = null; _busy = true; _stage = 'Reading local files…'; });
     try {
       final result = await LocalImporter.chooseChapters();
-      if (!mounted) return;
-      if (result.isEmpty) {
-        setState(() { _notice = 'No chapters selected.'; });
-        return;
-      }
-      setState(() {
-        _imported = [..._imported, ...result];
-        if (_title.text == 'My offline book') {
-          _title.text = 'My collected chapters';
-        }
-        _notice = 'Added ' + result.length.toString() +
-            ' chapters locally. No files were uploaded.';
-      });
-    } catch (error) {
-      if (mounted) setState(() { _notice = _errorText(error); });
-    } finally {
-      if (mounted) setState(() { _busy = false; _stage = ''; });
-    }
-  }
-
-  String _errorText(Object error) {
-    if (error is RanobeException) return error.message;
-    if (error is FormatException) return error.message;
-    return error.toString().replaceFirst('Exception: ', '');
-  }
-
-  Future<void> _createEpub() async {
-    if (_busy) return;
-    final source = _mode;
-    final book = _novel;
-    final available = source == InputMode.files
-        ? _imported.length : (book == null ? 0 : _chapterCount);
-    if (available == 0) {
-      setState(() => _notice = source == InputMode.files
-          ? 'Import some chapters first.' : 'Find a book first.');
-      return;
-    }
-    var start = 1;
-    var end = available;
-    if (source == InputMode.link && _chapterMode == ChapterMode.latest) {
-      start = (available - 49).clamp(1, available);
-    } else if (source == InputMode.link && _chapterMode == ChapterMode.range) {
-      start = int.tryParse(_from.text) ?? 0;
-      end = int.tryParse(_to.text) ?? 0;
-      if (start < 1 || end < start || end > available) {
-        setState(() => _notice = 'Select chapter numbers between 1 and ' +
-            available.toString() + '.');
-        return;
-      }
-    }
-    setState(() {
-      _busy = true; _cancelRequested = false; _notice = null;
-      _progress = 0; _total = end - start + 1;
-      _stage = source == InputMode.files ? 'Formatting chapters…' : 'Loading chapters…';
-    });
-
-    try {
-      final selected = <BookChapter>[];
-      if (source == InputMode.files) {
-        selected.addAll(_imported);
-        if (mounted) setState(() => _progress = selected.length);
-      } else {
-        final chapters = _client.chaptersFor(book!, _branch)
-            .sublist(start - 1, end);
-        for (final chapter in chapters) {
-          if (_cancelRequested) throw const RanobeException('Export canceled.');
-          final html = await _client.fetchChapter(book, chapter, _branch);
-          selected.add(BookChapter(chapter.title, html));
-          if (mounted) setState(() => _progress = selected.length);
-          if (selected.length < chapters.length) {
-            // Gentle request pacing; no parallel hammering of the source API.
-            await Future<void>.delayed(const Duration(milliseconds: 500));
-          }
-        }
-      }
-
-      if (_cancelRequested) throw const RanobeException('Export canceled.');
-      if (mounted) setState(() => _stage = 'Packaging EPUB…');
-      await Future<void>.delayed(const Duration(milliseconds: 20));
-      final bytes = EpubBuilder.build(
-        title: _title.text,
-        author: _author.text,
-        chapters: selected,
-      );
-      if (_cancelRequested) throw const RanobeException('Export canceled.');
-      _save(EpubBuilder.safeFilename(_title.text), bytes);
       if (mounted) setState(() {
-        _notice = 'EPUB created entirely on your device (' +
-            selected.length.toString() + ' chapters). Check Downloads.';
-        _stage = 'Complete';
+        _imported = [..._imported,...result];
+        _status = 'Imported ' + result.length.toString() + ' chapter files.';
+        _error = null;
       });
-    } catch (error) {
-      if (mounted) setState(() { _notice = _errorText(error); _stage = 'Stopped'; });
-    } finally {
-      if (mounted) setState(() => _busy = false);
+    } catch(e) {
+      if (mounted) setState(() => _error = _errorText(e));
     }
   }
 
-  void _save(String filename, Uint8List bytes) {
-    final blob = browser.Blob([bytes], 'application/epub+zip');
-    final objectUrl = browser.Url.createObjectUrlFromBlob(blob);
-    final link = browser.AnchorElement(href: objectUrl)
-      ..download = filename
-      ..style.display = 'none';
-    browser.document.body?.append(link);
-    link.click();
-    link.remove();
-    Future<void>.delayed(const Duration(seconds: 3), () {
-      browser.Url.revokeObjectUrl(objectUrl);
+  void _convertImported() {
+    if (_imported.isEmpty) {
+      setState(() => _error = 'Please import chapter files first.');return;
+    }
+    _chapters = List.of(_imported);
+    _done = _chapters.length;_total = _done;
+    unawaited(_createEpub());
+  }
+
+  void _stop() {
+    _cancelled = true;
+    _busy = false;
+    _awaitingHelper = false;
+    if (_token != null && _sourceOrigin != null) {
+      try {
+        _readerWindow?.postMessage(jsonEncode({
+          'leaf':2,'type':'stop','token':_token}), _sourceOrigin!);
+      } catch (_) {}
+    }
+    setState(() => _status = 'Paused. Collected chapters are kept in this tab.');
+  }
+
+  String _errorText(Object e) =>
+      e is FormatException ? e.message : e.toString().replaceFirst('Exception: ', '');
+
+  void _demo() {
+    if (_busy) return;
+    setState(() {
+      _first.text=demoStart;_last.text=demoEnd;
+      _title.text='Pride and Prejudice';_author.text='Jane Austen';
+      _error=null;
+      _status='Three chapters: public-domain Wikimedia direct API demo.';
     });
   }
 
   @override
   Widget build(BuildContext context) {
-    final compact = MediaQuery.sizeOf(context).width < 760;
-    final mainColumn = Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        _header(),
-        const SizedBox(height: 50),
-        _heading(compact),
-        const SizedBox(height: 31),
-        _modePicker(),
-        const SizedBox(height: 22),
-        _sourcePanel(),
-        const SizedBox(height: 22),
-        if (_hasContent) _metadataPanel(),
-        if (_hasContent) const SizedBox(height: 22),
-        _explainPanel(),
-        if (_notice != null) ...[
-          const SizedBox(height: 18),
-          _noticePanel(_notice!),
-        ],
-        if (_busy || _total > 0) ...[
-          const SizedBox(height: 18),
-          _progressPanel(),
-        ],
-        const SizedBox(height: 46),
-        const Divider(color: _line),
-        const SizedBox(height: 14),
-        const Text('leaf.  ·  EPUBs made privately in your browser',
-          style: TextStyle(color: _muted, fontSize: 12)),
-      ],
-    );
-    return Scaffold(
-      body: SafeArea(
-        child: SingleChildScrollView(
-          padding: EdgeInsets.fromLTRB(compact ? 18 : 40, 0, compact ? 18 : 40, 46),
-          child: Center(child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 900),
-            child: mainColumn,
-          )),
-        ),
-      ),
-    );
-  }
-
-  bool get _hasContent => _mode == InputMode.files
-      ? _imported.isNotEmpty : _novel != null;
-
-  Widget _header() => Container(
-    padding: const EdgeInsets.symmetric(vertical: 22),
-    decoration: const BoxDecoration(border: Border(bottom: BorderSide(color: _line))),
-    child: Row(children: [
-      Container(
-        width: 38, height: 38,
-        decoration: BoxDecoration(color: _ink, borderRadius: BorderRadius.circular(11)),
-        child: const Icon(Icons.auto_stories_rounded, color: Colors.white, size: 20),
-      ),
-      const SizedBox(width: 12),
-      const Text('leaf.', style: TextStyle(
-          fontSize: 25, fontWeight: FontWeight.w700, color: _ink, letterSpacing: -1)),
-      const Spacer(),
-      const Icon(Icons.lock_outline_rounded, color: _green, size: 16),
-      const SizedBox(width: 6),
-      const Text('100% browser-only', style: TextStyle(color: _green, fontSize: 12)),
-    ]),
-  );
-
-  Widget _heading(bool compact) => Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-    const Text('THE PERSONAL BOOKMAKER', style: TextStyle(
-        color: _green, fontSize: 10, fontWeight: FontWeight.w700, letterSpacing: 2.4)),
-    const SizedBox(height: 11),
-    Text('Keep good stories.\nRead anywhere.',
-      style: TextStyle(
-        fontFamily: 'Georgia', color: _ink, height: 1.13,
-        letterSpacing: -1.8, fontSize: compact ? 39 : 55,
-      )),
-    const SizedBox(height: 13),
-    const Text('Turn accessible chapters or your own text files into a clean, organized EPUB.',
-      style: TextStyle(color: _muted, fontSize: 14, height: 1.6)),
-  ]);
-
-  Widget _modePicker() => Wrap(spacing: 10, runSpacing: 10, children: [
-    _modeButton('Import files', Icons.upload_file_rounded, InputMode.files),
-    _modeButton('RanobeLIB link', Icons.link_rounded, InputMode.link),
-  ]);
-
-  Widget _modeButton(String name, IconData icon, InputMode mode) {
-    final active = _mode == mode;
-    return ChoiceChip(
-      selected: active,
-      label: Text(name),
-      avatar: Icon(icon, size: 18, color: active ? _green : _muted),
-      selectedColor: const Color(0xFFE7F0E7),
-      side: BorderSide(color: active ? _green : _line),
-      onSelected: _busy ? null : (_) => setState(() {
-        _mode = mode;
-        _notice = null;
-        _progress = 0; _total = 0; _stage = '';
-      }),
-    );
-  }
-
-  Widget _sourcePanel() => _surface(Column(
-    crossAxisAlignment: CrossAxisAlignment.start,
-    children: [
-      _panelTitle('01', _mode == InputMode.files ? 'Your chapter files' : 'Find a story'),
-      const SizedBox(height: 18),
-      if (_mode == InputMode.files) ...[
-        const Text('Import TXT, HTML or JSON. Choose one or several chapter files.',
-          style: TextStyle(color: _muted, fontSize: 13, height: 1.5)),
-        const SizedBox(height: 16),
-        SizedBox(width: double.infinity, child: _button(
-          'Choose files', Icons.upload_file_rounded, _busy ? null : _import,
-        )),
-        if (_imported.isNotEmpty) ...[
-          const SizedBox(height: 18),
-          Text(_imported.length.toString() + ' chapters ready',
-            style: const TextStyle(color: _green, fontWeight: FontWeight.w700)),
-          const SizedBox(height: 7),
-          ..._imported.take(6).map((c) => Padding(
-            padding: const EdgeInsets.symmetric(vertical: 3),
-            child: Text('• ' + c.title, maxLines: 1, overflow: TextOverflow.ellipsis,
-              style: const TextStyle(color: _muted, fontSize: 12)),
-          )),
-          if (_imported.length > 6) Text('… and ' +
-              (_imported.length - 6).toString() + ' more',
-              style: const TextStyle(color: _muted, fontSize: 12)),
+    final compact = MediaQuery.sizeOf(context).width < 740;
+    return Scaffold(body: SafeArea(child: SingleChildScrollView(
+      padding: EdgeInsets.fromLTRB(compact?18:35,0,compact?18:35,50),
+      child: Center(child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 850),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          _header(),
+          const SizedBox(height: 43),
+          const Text('YOUR PRIVATE BOOKMAKER',style:TextStyle(
+            color:pine,fontSize:10,fontWeight:FontWeight.w700,letterSpacing:2)),
           const SizedBox(height: 10),
-          TextButton.icon(
-            onPressed: _busy ? null : () => setState(() { _imported.clear(); _notice = null; }),
-            icon: const Icon(Icons.delete_outline_rounded, size: 17),
-            label: const Text('Clear files'),
-          ),
-        ],
-      ] else ...[
-        const Text('RANOBELIB BOOK URL', style: TextStyle(
-            fontSize: 10, color: _muted, fontWeight: FontWeight.w700, letterSpacing: 1.4)),
-        const SizedBox(height: 9),
-        TextField(
-          controller: _url,
-          enabled: !_busy,
-          keyboardType: TextInputType.url,
-          minLines: 1, maxLines: 3,
-          style: const TextStyle(fontSize: 12, color: _ink),
-          decoration: const InputDecoration(prefixIcon: Icon(Icons.link_rounded, color: _muted)),
-          onSubmitted: (_) => _inspect(),
-        ),
-        const SizedBox(height: 13),
-        SizedBox(width: double.infinity, child: _button(
-          'Find book', Icons.arrow_forward_rounded, _busy ? null : _inspect,
-        )),
-        const SizedBox(height: 13),
-        const Text(
-          'Direct API access is experimental. RanobeLIB currently blocks '
-          'third-party browser requests (CORS / HTTP 403). No proxy or backend is used.',
-          style: TextStyle(color: _muted, fontSize: 11, height: 1.5),
-        ),
-        if (_novel != null) ...[
-          const SizedBox(height: 16),
-          Text(_novel!.title, style: const TextStyle(
-            fontFamily: 'Georgia', color: _ink, fontSize: 19)),
-          const SizedBox(height: 7),
-          Text(_chapterCount.toString() + ' chapters available',
-            style: const TextStyle(color: _green, fontSize: 12)),
-          const SizedBox(height: 14),
-          DropdownButtonFormField<String>(
-            value: _branch,
-            isExpanded: true,
-            decoration: const InputDecoration(labelText: 'Translation'),
-            items: _novel!.branches.entries.map((e) => DropdownMenuItem(
-              value: e.key,
-              child: Text(e.value, overflow: TextOverflow.ellipsis),
-            )).toList(),
-            onChanged: _busy ? null : (v) => setState(() {
-              _branch = v ?? 'auto';
-              _to.text = _chapterCount.toString();
-            }),
-          ),
-          const SizedBox(height: 15),
-          Wrap(spacing: 7, runSpacing: 7, children: [
-            _chapterChip(ChapterMode.all, 'All chapters'),
-            _chapterChip(ChapterMode.latest, 'Last 50'),
-            _chapterChip(ChapterMode.range, 'Choose range'),
+          Text('Keep good stories.\nRead anywhere.',
+            style:TextStyle(fontFamily:'Georgia',color:ink,
+              fontSize:compact?39:54,height:1.14,letterSpacing:-1.6)),
+          const SizedBox(height: 13),
+          const Text('Paste two chapter URLs. We find the pattern, collect '
+            'accessible pages, and make a real EPUB right in your browser.',
+            style:TextStyle(color:muted,fontSize:13,height:1.6)),
+          const SizedBox(height: 24),
+          Wrap(spacing:9,children:[
+            ChoiceChip(label:const Text('Chapter links'),
+              selected:_mode==Mode.links,
+              onSelected:_busy?null:(_)=>setState(()=>_mode=Mode.links)),
+            ChoiceChip(label:const Text('Import files'),
+              selected:_mode==Mode.files,
+              onSelected:_busy?null:(_)=>setState(()=>_mode=Mode.files)),
           ]),
-          if (_chapterMode == ChapterMode.range) ...[
-            const SizedBox(height: 13),
-            Row(children: [
-              Expanded(child: TextField(
-                controller: _from,
-                keyboardType: TextInputType.number,
-                inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                decoration: const InputDecoration(labelText: 'From'),
-              )),
-              const SizedBox(width: 10),
-              Expanded(child: TextField(
-                controller: _to,
-                keyboardType: TextInputType.number,
-                inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                decoration: const InputDecoration(labelText: 'To'),
-              )),
-            ]),
+          const SizedBox(height: 18),
+          _mode==Mode.links?_linksPanel():_filePanel(),
+          if (_error!=null) ...[
+            const SizedBox(height:16),_statusBox(_error!,true),
           ],
-        ],
-      ],
-    ],
-  ));
+          if (_busy||_done>0||_bookReady) ...[
+            const SizedBox(height:16),_progressPanel(),
+          ],
+          if(_mode==Mode.links)...[
+            const SizedBox(height:18),_helperPanel(),
+          ],
+          const SizedBox(height:17),
+          _statusBox(_status,false),
+          const SizedBox(height:39),
+          const Divider(color:line),
+          const SizedBox(height:14),
+          const Text('leaf. · No Python · No backend · EPUB generated in Dart',
+            style:TextStyle(fontSize:11,color:muted)),
+        ]),
+      )),
+    )));
+  }
 
-  Widget _chapterChip(ChapterMode mode, String label) => ChoiceChip(
-    label: Text(label, style: const TextStyle(fontSize: 12)),
-    selected: _chapterMode == mode,
-    onSelected: _busy ? null : (_) => setState(() => _chapterMode = mode),
+  Widget _header()=>Container(
+    padding:const EdgeInsets.symmetric(vertical:20),
+    decoration:const BoxDecoration(border:Border(bottom:BorderSide(color:line))),
+    child:Row(children:[
+      Container(width:37,height:37,
+        decoration:BoxDecoration(color:ink,borderRadius:BorderRadius.circular(10)),
+        child:const Icon(Icons.menu_book_rounded,size:20,color:Colors.white)),
+      const SizedBox(width:11),
+      const Text('leaf.',style:TextStyle(
+        color:ink,fontSize:24,fontWeight:FontWeight.w700)),
+      const Spacer(),
+      const Icon(Icons.lock_outline,size:15,color:pine),
+      const SizedBox(width:6),
+      const Text('Browser only',style:TextStyle(color:pine,fontSize:12)),
+    ]),
   );
 
-  Widget _metadataPanel() => _surface(Column(
-    crossAxisAlignment: CrossAxisAlignment.start,
-    children: [
-      _panelTitle('02', 'Make your EPUB'),
-      const SizedBox(height: 17),
-      const Text('BOOK TITLE', style: TextStyle(
-          fontSize: 10, fontWeight: FontWeight.w700, color: _muted)),
-      const SizedBox(height: 7),
-      TextField(controller: _title, enabled: !_busy),
-      const SizedBox(height: 14),
-      const Text('AUTHOR', style: TextStyle(
-          fontSize: 10, fontWeight: FontWeight.w700, color: _muted)),
-      const SizedBox(height: 7),
-      TextField(controller: _author, enabled: !_busy,
-          decoration: const InputDecoration(hintText: 'Optional')),
-      const SizedBox(height: 21),
-      SizedBox(width: double.infinity, child: _button(
-        _busy ? 'Working…' : 'Create EPUB',
-        Icons.menu_book_rounded, _busy ? null : _createEpub,
-      )),
-      if (_busy && _mode == InputMode.link) ...[
-        const SizedBox(height: 9),
-        Align(alignment: Alignment.centerRight, child: TextButton.icon(
-          onPressed: () => setState(() => _cancelRequested = true),
-          icon: const Icon(Icons.close_rounded, size: 16),
-          label: const Text('Cancel'),
-        )),
+  Widget _linksPanel()=>_surface(Column(
+    crossAxisAlignment:CrossAxisAlignment.start,children:[
+      _heading('01','Choose your chapter range'),
+      const SizedBox(height:13),
+      const Text('Paste the first and last chapter URL from the same site. '
+        'Numbered URLs are handled automatically; opaque paths use Next links.',
+        style:TextStyle(color:muted,fontSize:12,height:1.55)),
+      const SizedBox(height:18),
+      _label('FIRST CHAPTER URL'),const SizedBox(height:7),
+      _field(_first,'https://site.example/read/chapter/1'),
+      const SizedBox(height:14),
+      _label('LAST CHAPTER URL'),const SizedBox(height:7),
+      _field(_last,'https://site.example/read/chapter/20'),
+      const SizedBox(height:7),
+      TextButton.icon(onPressed:_busy?null:_demo,
+        icon:const Icon(Icons.science_outlined,size:17),
+        label:const Text('Try the open-book demo (3 chapters)')),
+      const SizedBox(height:14),
+      _label('BOOK TITLE'),const SizedBox(height:7),
+      _field(_title,'Book title'),
+      const SizedBox(height:13),
+      _label('AUTHOR'),const SizedBox(height:7),
+      _field(_author,'Author (optional)'),
+      const SizedBox(height:20),
+      SizedBox(width:double.infinity,child:_button(
+        'Collect & download EPUB',Icons.download_rounded,_busy?null:_start)),
+      if(_busy)...[
+        const SizedBox(height:9),
+        Align(alignment:Alignment.centerRight,child:TextButton.icon(
+          onPressed:_stop,icon:const Icon(Icons.pause,size:16),
+          label:const Text('Pause / cancel'))),
       ],
-      const SizedBox(height: 9),
-      const Text('The file is built on this device and saved to your browser Downloads.',
-        style: TextStyle(color: _muted, fontSize: 11, height: 1.5)),
+      const SizedBox(height:9),
+      const Text('Wikisource/Wikibooks: fully automated from Leaf. '
+        'Other websites: open the tab and activate Leaf Capture once. '
+        'CAPTCHAs and access restrictions are never bypassed.',
+        style:TextStyle(color:muted,fontSize:11,height:1.5)),
     ],
   ));
 
-  Widget _progressPanel() => _surface(Column(
-    crossAxisAlignment: CrossAxisAlignment.start,
-    children: [
-      Text(_stage, style: const TextStyle(color: _ink, fontWeight: FontWeight.w600)),
-      const SizedBox(height: 9),
+  Widget _filePanel()=>_surface(Column(
+    crossAxisAlignment:CrossAxisAlignment.start,children:[
+      _heading('01','Your local chapters'),const SizedBox(height:16),
+      const Text('Import TXT, HTML or JSON files. Files stay on your device.',
+        style:TextStyle(color:muted,fontSize:12)),
+      const SizedBox(height:14),
+      SizedBox(width:double.infinity,child:_button(
+        'Choose files',Icons.upload_file_rounded,_busy?null:_import)),
+      const SizedBox(height:10),
+      Text(_imported.length.toString()+' chapters ready',
+        style:const TextStyle(color:pine,fontSize:12)),
+      const SizedBox(height:18),
+      _label('BOOK TITLE'),const SizedBox(height:7),_field(_title,'Book title'),
+      const SizedBox(height:12),
+      _label('AUTHOR'),const SizedBox(height:7),_field(_author,'Author'),
+      const SizedBox(height:19),
+      SizedBox(width:double.infinity,child:_button(
+        'Create EPUB',Icons.download_rounded,_busy?null:_convertImported)),
+    ],
+  ));
+
+  Widget _helperPanel()=>_surface(Column(
+    crossAxisAlignment:CrossAxisAlignment.start,children:[
+      _heading('02','Other websites — setup once'),
+      const SizedBox(height:12),
+      const Text('If direct browser requests are blocked, Leaf opens the '
+        'normal reading website. The small helper runs in that source tab '
+        'and collects accessible chapter text at a gentle pace.',
+        style:TextStyle(color:muted,fontSize:12,height:1.6)),
+      const SizedBox(height:13),
+      const SizedBox(height:44,child:HtmlElementView(viewType:'leaf-bookmarklet')),
+      const SizedBox(height:6),
+      TextButton.icon(
+        onPressed:() async {
+          await Clipboard.setData(const ClipboardData(text:bookmarklet));
+          if(mounted) setState(() => _status =
+            'Copied. Create a bookmark called Leaf Capture and paste '
+            'the text into its URL field.');
+        },
+        icon:const Icon(Icons.copy,size:16),
+        label:const Text('Copy bookmarklet URL instead')),
+      const SizedBox(height:8),
+      const Text('In the opened site tab: sign in or handle any CAPTCHA '
+        'yourself, then click the Leaf Capture bookmark. For strict CSP '
+        'or COOP sites, automatic collection may not be possible.',
+        style:TextStyle(color:muted,fontSize:11,height:1.6)),
+      if(_awaitingHelper)...[
+        const SizedBox(height:10),
+        const Text('Waiting for Leaf Capture in source tab…',
+          style:TextStyle(color:pine,fontSize:12,fontWeight:FontWeight.w700)),
+      ],
+    ],
+  ));
+
+  Widget _progressPanel()=>_surface(Column(
+    crossAxisAlignment:CrossAxisAlignment.start,children:[
+      Row(children:[
+        const Icon(Icons.auto_stories_outlined,color:pine,size:20),
+        const SizedBox(width:10),
+        Text(_bookReady?'Your EPUB is ready':'Collecting chapters',
+          style:const TextStyle(color:ink,fontSize:17,fontFamily:'Georgia')),
+        const Spacer(),
+        Text(_done.toString()+' / '+_total.toString(),
+          style:const TextStyle(color:pine,fontSize:12)),
+      ]),
+      const SizedBox(height:14),
       LinearProgressIndicator(
-        value: _total <= 0 ? null : _progress / _total,
-        minHeight: 5, borderRadius: BorderRadius.circular(9),
-        backgroundColor: _line, color: _green,
-      ),
-      const SizedBox(height: 7),
-      Text(_progress.toString() + ' / ' + _total.toString() + ' chapters',
-        style: const TextStyle(color: _muted, fontSize: 11)),
+        value:_total>0?(_done/_total).clamp(0.0,1.0):null,
+        backgroundColor:line,color:pine,minHeight:6),
+      if(_bookReady)...[
+        const SizedBox(height:13),
+        SizedBox(width:double.infinity,child:_button(
+          'Download EPUB again',Icons.download_rounded,_download)),
+      ]else if(_chapters.isNotEmpty&&!_busy)...[
+        const SizedBox(height:13),
+        SizedBox(width:double.infinity,child:_button(
+          'Save collected chapters (partial EPUB)',Icons.download_rounded,
+          ()=>unawaited(_createEpub()))),
+      ],
     ],
   ));
 
-  Widget _explainPanel() => Container(
-    width: double.infinity,
-    padding: const EdgeInsets.all(16),
-    decoration: BoxDecoration(
-      color: const Color(0xFFF0F3EC),
-      borderRadius: BorderRadius.circular(12),
-    ),
-    child: const Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Icon(Icons.shield_outlined, color: _green, size: 20),
-      SizedBox(width: 12),
-      Expanded(child: Text(
-        'No accounts, no backend, no tracking. Imported text stays in the browser. '
-        'EPUB is generated locally using Dart. Only save chapters you have permission to use.',
-        style: TextStyle(color: _green, fontSize: 12, height: 1.55),
-      )),
+  Widget _statusBox(String value,bool error)=>Container(
+    width:double.infinity,
+    padding:const EdgeInsets.all(14),
+    decoration:BoxDecoration(
+      color:error?const Color(0xFFFFF2EE):const Color(0xFFEEF3EC),
+      border:Border.all(color:error?const Color(0xFFE5C5BC):line),
+      borderRadius:BorderRadius.circular(10)),
+    child:Row(crossAxisAlignment:CrossAxisAlignment.start,children:[
+      Icon(error?Icons.info_outline:Icons.check_circle_outline,
+        color:error?const Color(0xFF9B5B4C):pine,size:18),
+      const SizedBox(width:10),
+      Expanded(child:Text(value,style:TextStyle(
+        color:error?const Color(0xFF894A40):pine,
+        fontSize:12,height:1.5))),
     ]),
   );
 
-  Widget _noticePanel(String message) => Container(
-    width: double.infinity,
-    padding: const EdgeInsets.all(16),
-    decoration: BoxDecoration(
-      color: Colors.white,
-      border: Border.all(color: _line),
-      borderRadius: BorderRadius.circular(12),
-    ),
-    child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      const Icon(Icons.info_outline_rounded, color: _green, size: 19),
-      const SizedBox(width: 11),
-      Expanded(child: SelectableText(message,
-        style: const TextStyle(color: _ink, fontSize: 12, height: 1.5))),
-    ]),
-  );
-
-  Widget _panelTitle(String number, String text) => Row(children: [
-    Container(
-      height: 31, width: 31, alignment: Alignment.center,
-      decoration: BoxDecoration(color: const Color(0xFFE5EDE4),
-          borderRadius: BorderRadius.circular(9)),
-      child: Text(number, style: const TextStyle(
-          color: _green, fontWeight: FontWeight.w700, fontSize: 11)),
-    ),
-    const SizedBox(width: 12),
-    Text(text, style: const TextStyle(
-        fontFamily: 'Georgia', color: _ink, fontSize: 21)),
+  Widget _heading(String number,String label)=>Row(children:[
+    Container(width:31,height:31,alignment:Alignment.center,
+      decoration:BoxDecoration(color:const Color(0xFFE8F0E5),
+        borderRadius:BorderRadius.circular(9)),
+      child:Text(number,style:const TextStyle(
+        color:pine,fontSize:11,fontWeight:FontWeight.w700))),
+    const SizedBox(width:10),
+    Expanded(child:Text(label,style:const TextStyle(
+      fontSize:20,fontFamily:'Georgia',color:ink))),
   ]);
+  Widget _label(String value)=>Text(value,style:const TextStyle(
+    color:muted,fontSize:10,fontWeight:FontWeight.w700,letterSpacing:1.2));
 
-  Widget _surface(Widget child) => Container(
-    width: double.infinity,
-    padding: const EdgeInsets.all(23),
-    decoration: BoxDecoration(
-      color: Colors.white,
-      borderRadius: BorderRadius.circular(18),
-      border: Border.all(color: _line),
-      boxShadow: const [BoxShadow(color: Color(0x09000000),
-        blurRadius: 24, offset: Offset(0, 8))],
-    ),
-    child: child,
-  );
+  Widget _field(TextEditingController c,String hint)=>TextField(
+    controller:c,enabled:!_busy,
+    keyboardType:TextInputType.url,
+    minLines:1,maxLines:c==_title||c==_author?1:3,
+    style:const TextStyle(color:ink,fontSize:12),
+    decoration:InputDecoration(hintText:hint));
 
-  Widget _button(String text, IconData icon, VoidCallback? action) => FilledButton.icon(
-    onPressed: action,
-    style: FilledButton.styleFrom(
-      minimumSize: const Size(10, 51),
-      backgroundColor: _ink,
-      foregroundColor: Colors.white,
-      disabledBackgroundColor: const Color(0xFFADB7AE),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(11)),
-    ),
-    icon: Icon(icon, size: 17),
-    label: Text(text, style: const TextStyle(fontSize: 13)),
-  );
+  Widget _surface(Widget child)=>Container(
+    width:double.infinity,padding:const EdgeInsets.all(23),
+    decoration:BoxDecoration(color:Colors.white,
+      borderRadius:BorderRadius.circular(17),
+      border:Border.all(color:line),
+      boxShadow:const [BoxShadow(color:Color(0x09000000),
+        offset:Offset(0,7),blurRadius:25)]),
+    child:child);
+
+  Widget _button(String text,IconData icon,VoidCallback? fn)=>
+    FilledButton.icon(
+      onPressed:fn,
+      icon:Icon(icon,size:17),
+      label:Text(text,style:const TextStyle(fontSize:12)),
+      style:FilledButton.styleFrom(
+        backgroundColor:ink,foregroundColor:Colors.white,
+        disabledBackgroundColor:const Color(0xFF9FA99F),
+        minimumSize:const Size(50,49),
+        shape:RoundedRectangleBorder(borderRadius:BorderRadius.circular(10)),
+      ),
+    );
 }
