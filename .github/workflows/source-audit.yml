@@ -26,3 +26,33 @@ jobs:
           probe 'Project Gutenberg public HTML' 'https://www.gutenberg.org/cache/epub/1342/pg1342-images.html'
           probe 'Standard Ebooks reader' 'https://standardebooks.org/ebooks/jane-austen/pride-and-prejudice'
           probe 'RanobeLIB API' 'https://api.cdnlibs.org/api/manga/202399--okiraku-ryoushu-no-tanoshii-ryouchi-bouei-seisan-kei-majutsu-de-na-mo-naki-mura-wo-saikyou-no-jousai-toshi-ni'
+
+      - name: Verify real open-book chapter bodies and not just CORS headers
+        run: |
+          python3 - <<'PY'
+          from urllib.parse import urlencode
+          from urllib.request import Request,urlopen
+          import json
+          samples=[
+             ("English Wikisource","en.wikisource.org","Pride and Prejudice (1817)/Chapter 1"),
+             ("English Wikibooks","en.wikibooks.org","Wikibooks:Welcome"),
+             ("Russian Wikisource","ru.wikisource.org","Капитанская дочка (Пушкин)/1978 (СО)"),
+          ]
+          for name,host,title in samples:
+              uri="https://"+host+"/w/api.php?"+urlencode({
+                  "action":"parse","page":title,"prop":"text",
+                  "format":"json","formatversion":"2","origin":"*"})
+              request=Request(uri,headers={
+                  "User-Agent":"Leaf-Learning/0.3 (https://github.com/alex00Pirotskyi/leaf-ranobelib)",
+                  "Origin":"https://alex00pirotskyi.github.io"
+              })
+              with urlopen(request,timeout=30) as response:
+                  code=response.status
+                  cors=response.headers.get("Access-Control-Allow-Origin")
+                  data=json.load(response)
+              parsed=data.get("parse",{})
+              body=parsed.get("text","")
+              assert code==200 and cors=="*", (name,code,cors)
+              assert len(body)>300, (name, len(body), data.get("error"))
+              print(name,": live text =",len(body),"bytes; CORS =",cors,"; title =",parsed.get("title",""))
+          PY
