@@ -17,7 +17,7 @@ DEV_PYTHON := $(if $(wildcard $(VENV_PYTHON)),$(VENV_PYTHON),$(PYTHON))
 COMPOSE ?= docker compose
 FLUTTER ?= flutter
 
-.PHONY: up start down stop restart rebuild logs ps health setup backend web dev build-web test git-status git-remote github-create github-push github-rename-pages pages-api-url pages-open clean help
+.PHONY: up start down stop restart rebuild logs ps health setup backend web dev build-web test git-status git-remote github-create github-push github-rename-pages pages-enable publish-pages pages-api-url pages-open clean help
 
 up: ## Build and start app (http://localhost:8080)
 	$(COMPOSE) up --build -d
@@ -86,10 +86,28 @@ github-create: ## Create a PRIVATE GitHub repo and push (needs gh auth login)
 github-push: ## Push main to current origin (also works after Pages rename)
 	@git push --set-upstream origin main
 
-github-rename-pages: ## Rename existing GitHub repo to the root Pages domain (requires gh)
-	@gh repo rename "$(PAGES_REPO)" --repo "$(GITHUB_REPO)" --yes
+github-rename-pages: ## Rename repo to enable https://username.github.io/ (requires gh)
+	@gh auth status >/dev/null 2>&1 || { echo "Run: gh auth login"; exit 1; }
+	@if gh repo view "$(GITHUB_OWNER)/$(PAGES_REPO)" >/dev/null 2>&1; then \
+		echo "Root Pages repo already exists"; \
+	else \
+		gh repo rename "$(PAGES_REPO)" --repo "$(GITHUB_REPO)" --yes; \
+	fi
 	@git remote set-url origin "https://github.com/$(GITHUB_OWNER)/$(PAGES_REPO).git"
 	@echo "Root Pages repository: https://github.com/$(GITHUB_OWNER)/$(PAGES_REPO)"
+
+pages-enable: ## Enable GitHub Pages via GitHub CLI and trigger deployment
+	@gh auth status >/dev/null 2>&1 || { echo "Run: gh auth login"; exit 1; }
+	@REPO=$(gh repo view --json nameWithOwner --jq .nameWithOwner) && \
+		if gh api "repos/$REPO/pages" >/dev/null 2>&1; then \
+			gh api -X PUT "repos/$REPO/pages" -f build_type=workflow >/dev/null; \
+		else \
+			gh api -X POST "repos/$REPO/pages" -f build_type=workflow >/dev/null; \
+		fi
+	@gh workflow run pages.yml
+	@echo "Pages enabled. Track: gh run list --workflow pages.yml --limit 1"
+
+publish-pages: github-rename-pages pages-enable ## Rename, enable Pages, trigger Flutter deployment
 
 pages-api-url: ## Set GitHub Actions variable; e.g. make pages-api-url LEAF_API_URL=https://my-api.onrender.com
 	@test -n "$(LEAF_API_URL)" || { echo "Missing LEAF_API_URL=https://your-backend.onrender.com"; exit 1; }
