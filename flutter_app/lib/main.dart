@@ -96,6 +96,12 @@ class _LeafHomeState extends State<LeafHome> {
   Uint8List? _epub;
   List<BookChapter> _chapters = [], _imported = [];
   int _done = 0, _total = 0;
+  bool _mobilePrepared = false;
+  bool get _isIPhoneSafari => RegExp(r'iPhone|iPad|iPod').hasMatch(browser.window.navigator.userAgent);
+  bool get _mobileNeedsCapture {
+    final uri = Uri.tryParse(_first.text.trim());
+    return _isIPhoneSafari && (uri == null || !OpenReader.supports(uri));
+  }
 
   @override
   void initState() {
@@ -131,6 +137,7 @@ class _LeafHomeState extends State<LeafHome> {
     } catch (_) { return; }
     if (data['leaf'] != 2) return;
     if (data['type'] == 'hello') {
+      if (data['token'] != _token) return;
       final pageUrl = (data['pageUrl'] ?? '').toString();
       final proposed = Uri.tryParse(pageUrl);
       final resumeUrl = !plan.inferred && proposed != null &&
@@ -198,6 +205,24 @@ class _LeafHomeState extends State<LeafHome> {
     } catch (e) {
       setState(() => _error = _errorText(e)); return;
     }
+    if (_mobileNeedsCapture && !(plan.isWikimedia && plan.inferred)) {
+      setState(() {
+        _plan = plan;
+        _epub = null; _bookReady = false; _chapters = [];
+        _done = 0; _total = 0; _busy = false;
+        _awaitingHelper = false; _mobilePrepared = false;
+        _error = null;
+        if (_title.text == 'Pride and Prejudice') {
+          _title.text = 'Collected RanobeLIB chapters';
+          _author.clear();
+        }
+        _status = 'iPhone Safari cannot read another website from Leaf. '
+          'Prepare your personalized Safari Capture bookmark below, then '
+          'open the first chapter and activate it there. Import the saved '
+          'JSON into Leaf to make an EPUB.';
+      });
+      return;
+    }
     setState(() {
       _plan = plan; _epub = null; _bookReady = false;
       _chapters = []; _done = 0;
@@ -214,7 +239,7 @@ class _LeafHomeState extends State<LeafHome> {
     _token = _createToken();
     _sourceOrigin = plan.start.origin;
     _readerWindow = browser.window.open(
-      plan.start.toString(), 'leaf-chapter-source');
+      plan.start.replace(fragment: 'leaf_session=$_token').toString(), 'leaf-chapter-source');
     if (_readerWindow == null) {
       setState(() {
         _busy = false;
@@ -361,6 +386,68 @@ class _LeafHomeState extends State<LeafHome> {
       });
     } catch (e) {
       if (mounted) setState(() => _error = _errorText(e));
+    }
+  }
+
+  Future<void> _prepareSafariCapture() async {
+    late final ChapterUrlPlan plan;
+    try {
+      plan = ChapterUrlPlan.parse(_first.text, _last.text);
+      if (plan.isWikimedia && plan.inferred) {
+        throw const FormatException('For Wikisource, just press Collect & download EPUB.');
+      }
+      if (mounted) setState(() {
+        _status = 'Preparing your Safari chapter collector…';
+        _error = null;
+      });
+      final response = await http.get(Uri.base.resolve('leaf-capture.js'))
+          .timeout(const Duration(seconds: 20));
+      if (response.statusCode != 200) {
+        throw FormatException('Cannot load chapter helper (HTTP ' +
+            response.statusCode.toString() + ').');
+      }
+      final source = utf8.decode(response.bodyBytes);
+      if (!source.contains('leafCaptureV2') || source.length > 90000) {
+        throw const FormatException('Unexpected chapter collector source.');
+      }
+      final job = jsonEncode({
+        'token': _createToken(),
+        'start': plan.start.toString(),
+        'end': plan.end.toString(),
+        'urls': plan.urls.map((url) => url.toString()).toList(),
+        'max': plan.inferred ? plan.urls.length : ChapterUrlPlan.maxChapters,
+        'title': _title.text,
+        'resumeFrom': 0,
+      });
+      // Self-contained bookmarklet; works without a popup/opener connection.
+      // Source sites may nevertheless block bookmarklets or automation.
+      final javascript = 'javascript:(function(){window.__leafOfflineJobV2=' +
+          job + ';' + source.replaceAll(RegExp(r'\r?\n'), ' ') + '})();';
+      await Clipboard.setData(ClipboardData(text: javascript));
+      if (mounted) setState(() {
+        _plan = plan;
+        _mobilePrepared = true;
+        _status = 'Personalized collector copied. Create or edit a Safari '
+            'bookmark named Leaf Capture; paste the code in its URL field. '
+            'Open the first chapter and tap that bookmark. Exported chapters '
+            'will be saved as JSON, ready for Leaf Import files.';
+        _error = null;
+      });
+    } catch (error) {
+      if (mounted) setState(() => _error = _errorText(error));
+    }
+  }
+
+  void _openMobileChapter() {
+    try {
+      final plan = ChapterUrlPlan.parse(_first.text, _last.text);
+      browser.window.open(plan.start.toString(), '_blank');
+      setState(() => _status =
+          'Opened the first chapter in Safari. Solve any login or CAPTCHA '
+          'yourself. From Bookmarks, tap Leaf Capture. After it saves JSON, '
+          'return to Leaf → Import files → Create EPUB.');
+    } catch (error) {
+      setState(() => _error = _errorText(error));
     }
   }
 
