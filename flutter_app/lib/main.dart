@@ -366,6 +366,39 @@ class _LeafHomeState extends State<LeafHome> {
     });
   }
 
+  Future<void> _copyCapturePlan() async {
+    try {
+      final plan = ChapterUrlPlan.parse(_first.text, _last.text);
+      if (plan.isWikimedia && plan.inferred) {
+        throw const FormatException(
+          'Open Wikisource and Wikibooks chapters directly with Collect & download EPUB.',
+        );
+      }
+      final data = jsonEncode({
+        'leaf': 2,
+        'type': 'job',
+        'token': _createToken(),
+        'start': plan.start.toString(),
+        'end': plan.end.toString(),
+        'urls': plan.urls.map((u) => u.toString()).toList(),
+        'max': plan.inferred ? plan.urls.length : ChapterUrlPlan.maxChapters,
+        'title': _title.text,
+        'resumeFrom': 0,
+        'manualMode': true,
+      });
+      await Clipboard.setData(ClipboardData(text: data));
+      if (mounted) setState(() {
+        _error = null;
+        _status = 'Capture plan copied. In the source tab click your '
+            'Leaf Capture bookmark, paste the plan into its panel, and '
+            'click Start using pasted plan. It will export a JSON file '
+            'for Leaf → Import files → Create EPUB.';
+      });
+    } catch (e) {
+      if (mounted) setState(() => _error = _errorText(e));
+    }
+  }
+
   Future<void> _copySelfContainedCapture() async {
     try {
       final response = await http.get(Uri.base.resolve('leaf-capture.js'))
@@ -634,6 +667,10 @@ class _LeafHomeState extends State<LeafHome> {
         onPressed:()=>unawaited(_copySelfContainedCapture()),
         icon:const Icon(Icons.code_rounded,size:16),
         label:const Text('Copy self-contained helper (CSP fallback)')),
+      TextButton.icon(
+        onPressed:()=>unawaited(_copyCapturePlan()),
+        icon:const Icon(Icons.assignment_outlined,size:16),
+        label:const Text('Copy capture plan (no tab connection needed)')),
       const SizedBox(height:8),
       const Text('In the opened site tab: sign in or handle any CAPTCHA '
         'yourself, then click the Leaf Capture bookmark. For strict CSP '
