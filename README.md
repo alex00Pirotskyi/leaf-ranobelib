@@ -6,6 +6,76 @@ A compact, responsive, Kindle-inspired web interface for [zeroma25/ranobelib-dow
 
 The user-provided book URL is already prefilled in the Flutter interface.
 
+## Deploy on the public internet (GitHub Pages + Render)
+
+**GitHub Pages cannot execute Python.** This project uses GitHub Pages for the Flutter Web frontend and a separate Docker web service for the original EPUB downloader. A public frontend without a reachable API can display, but cannot download books.
+
+### 1. Put this site at https://alex00pirotskyi.github.io/
+
+Your existing repository is `alex00Pirotskyi/leaf-ranobelib`. Rename it to
+`alex00Pirotskyi.github.io` at GitHub **Settings → General → Repository name**.
+Or, with GitHub CLI installed and logged in, run:
+
+```powershell
+make github-rename-pages
+```
+
+This is a **username-site** repository name; keeping the name `leaf-ranobelib` gives the project URL `https://alex00pirotskyi.github.io/leaf-ranobelib/` instead. The Pages workflow supports both cases.
+
+**GitHub Pages on private repositories depends on your plan/permissions.**
+If Pages is unavailable for this private repository, make it public deliberately
+or use an alternative static host. Do not commit any secrets.
+
+In repository **Settings → Pages**, choose **Build and deployment → Source: GitHub Actions**.
+The workflow `.github/workflows/pages.yml` builds and deploys Flutter Web on
+push to `main`. The first run can also be triggered manually from **Actions → Deploy Flutter Web to GitHub Pages → Run workflow**.
+
+### 2. Host the Python backend
+
+A `render.yaml` Blueprint is included for a Docker web service at Render.
+In your Render dashboard, create a Blueprint from the GitHub repository.
+Authorize Render for this private repo and select the Blueprint. The default is
+the paid `starter` plan; inspect Render's current prices before confirming.
+Your URL will resemble `https://leaf-ranobelib-api.onrender.com`, but **use the
+actual URL Render assigns**, not this example.
+
+The service must have environment variable:
+
+```text
+LEAF_ALLOWED_ORIGINS=https://alex00pirotskyi.github.io
+```
+
+If keeping the original project path, this is still the correct origin.
+The backend is anonymous by design and can consume compute/bandwidth; use
+network/access controls or an authentication layer if you expose it publicly.
+CORS is not authentication.
+
+### 3. Link the Flutter build to your backend
+
+From the GitHub repository, go to **Settings → Secrets and variables → Actions →
+Variables → New repository variable**. Set:
+
+- Name: `LEAF_API_URL`
+- Value: the Render HTTPS backend origin (no trailing slash), e.g. `https://your-service.onrender.com`
+
+Or use:
+
+```powershell
+make pages-api-url LEAF_API_URL=https://your-actual-service.onrender.com
+```
+
+Trigger **Actions → Deploy Flutter Web to GitHub Pages → Run workflow** again after
+the variable is set. Visit `https://alex00pirotskyi.github.io/` once both
+deployments are healthy. If you did not rename the repository, use
+`https://alex00pirotskyi.github.io/leaf-ranobelib/`.
+
+**Local Windows error `make: docker: No such file or directory`:** Docker Desktop
+is missing/not in PATH. Docker is only needed for local `make`. The GitHub
+Actions frontend build and Render backend deployment do not need Docker
+installed on your own computer.
+
+---
+
 ## One-command start (Makefile)
 
 The project is initialized as a Git repository (branch `main`) with a configured
@@ -13,8 +83,7 @@ GitHub remote:
 
 `https://github.com/alex00Pirotskyi/leaf-ranobelib.git`
 
-**Note:** This is the configured *destination*, not yet a created GitHub repository.
-Create it using one of the methods below before pushing.
+**Note:** This repository has already been created and pushed to GitHub. See the public deployment guide above for Pages setup.
 
 ```sh
 make            # builds and runs the app using Docker, in the background
