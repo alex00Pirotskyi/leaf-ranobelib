@@ -5,6 +5,7 @@ import 'package:html/parser.dart' as parser;
 import 'package:http/http.dart' as http;
 
 import 'epub_builder.dart';
+import 'ranobe_client.dart' show escapeXml;
 
 /// Fast path for Wikimedia's supported public cross-origin Action API.
 ///
@@ -80,7 +81,7 @@ class OpenReader {
 }
 
 int _readableLength(String html) =>
-    parser.parseFragment(html).text.replaceAll(RegExp(r'\s+'), ' ').trim().length;
+    (parser.parseFragment(html).text ?? '').replaceAll(RegExp(r'\s+'), ' ').trim().length;
 
 /// Remove wiki navigation, edit links, templates and page metadata, leaving
 /// the article body. The EPUB's shared sanitizer runs once more on output.
