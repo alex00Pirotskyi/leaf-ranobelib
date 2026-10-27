@@ -51,21 +51,15 @@ async function verifyDownload(download, filename) {
    console.log('SCENARIO 2: user-activated in-page helper on a public chapter fixture');
    await page.reload({waitUntil:'domcontentloaded'});
    await enableAccessibility(page);
-   const boxes=page.getByRole('textbox');
-   console.log('Text boxes',await boxes.count());
-   assert((await boxes.count())>=4,'Text inputs not accessible');
-   const firstUrl=SITE+'fixtures/chapter-1.html';
-   const lastUrl=SITE+'fixtures/chapter-3.html';
-   await boxes.nth(0).fill(firstUrl);
-   await boxes.nth(1).fill(lastUrl);
-   await boxes.nth(2).fill('Original Archive — Browser Test');
+   await page.getByRole('button',{name:/Try test collector pages/i}).click();
    const [popup] = await Promise.all([
      page.waitForEvent('popup',{timeout:20000}),
      page.getByRole('button',{name:/Collect.*download EPUB/i}).click(),
    ]);
    await popup.waitForLoadState('domcontentloaded');
    console.log('Reader tab',popup.url(),'opener?',await popup.evaluate(()=>!!window.opener));
-   assert(popup.url().includes('/fixtures/chapter-1.html'),'Wrong tab URL');
+   assert(popup.url()===SITE+'fixtures/chapter-1.html',
+     'Wrong tab URL: '+popup.url());
    const downloadPromise=page.waitForEvent('download',{timeout:90000});
    // Simulate a real user clicking the Leaf Capture bookmark on the fixture.
    await popup.evaluate(() => {
