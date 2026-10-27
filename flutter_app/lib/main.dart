@@ -8,6 +8,7 @@ import 'dart:ui_web' as ui_web;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:http/http.dart' as http;
 import 'core/chapter_url_plan.dart';
 import 'core/epub_builder.dart';
 import 'core/local_importer.dart';
@@ -334,6 +335,32 @@ class _LeafHomeState extends State<LeafHome> {
     });
   }
 
+  Future<void> _copySelfContainedCapture() async {
+    try {
+      final response = await http.get(Uri.base.resolve('leaf-capture.js'))
+          .timeout(const Duration(seconds: 12));
+      if (response.statusCode != 200) {
+        throw FormatException('Cannot load the in-page helper (HTTP ' +
+            response.statusCode.toString() + ').');
+      }
+      final source = utf8.decode(response.bodyBytes);
+      if (!source.contains('leafCaptureV2') || source.length > 85000) {
+        throw const FormatException('Unexpected bookmarklet source.');
+      }
+      // The full source runs in the reader tab itself: no additional script
+      // request to GitHub Pages is needed after installation.
+      final javascript = 'javascript:' + source.replaceAll(RegExp(r'\r?\n'), ' ');
+      await Clipboard.setData(ClipboardData(text: javascript));
+      if (mounted) setState(() {
+        _status = 'Full self-contained bookmarklet copied. Create a new '
+            'bookmark and paste this in its URL field. Use this version '
+            'when a website blocks loading external scripts.';
+      });
+    } catch (e) {
+      if (mounted) setState(() => _error = _errorText(e));
+    }
+  }
+
   void _sampleCapture() {
     if (_busy) return;
     setState(() {
@@ -500,6 +527,10 @@ class _LeafHomeState extends State<LeafHome> {
         },
         icon:const Icon(Icons.copy,size:16),
         label:const Text('Copy bookmarklet URL instead')),
+      TextButton.icon(
+        onPressed:()=>unawaited(_copySelfContainedCapture()),
+        icon:const Icon(Icons.code_rounded,size:16),
+        label:const Text('Copy self-contained helper (CSP fallback)')),
       const SizedBox(height:8),
       const Text('In the opened site tab: sign in or handle any CAPTCHA '
         'yourself, then click the Leaf Capture bookmark. For strict CSP '
