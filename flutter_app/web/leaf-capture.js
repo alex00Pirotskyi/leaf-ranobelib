@@ -17,7 +17,8 @@
   const MAX_HTML = 600000;
   const WAIT_RENDER_MS = 12000;
   let job = null, stopped = false, busy = false, picker = false, selector = '';
-  let index = 0, currentUrl = location.href, lastTextHash = '', captured = [];
+  let index = 0, currentUrl = location.href, captured = [], completed = false;
+  let visited = new Set(), contentSignatures = new Set();
   const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
   const same = url => {
     try { const u = new URL(url, location.href); return u.protocol === 'https:' && u.origin === location.origin; }
@@ -95,7 +96,7 @@
   panel.append(titleEl,msg,controls,pasteZone);
   shadow.appendChild(panel);
   (document.body||document.documentElement).appendChild(host);
-  const status = text => {msg.textContent=String(text); send({type:'status',note:String(text),index});};
+  const status = text => {msg.textContent=String(text); send({type:'status',token:job?.token||sessionToken,note:String(text),index});};
 
   function text(node) {
     return (node?.innerText || node?.textContent || '').replace(/\s+/g,' ').trim();
@@ -147,16 +148,18 @@
       if (score>bestScore){best=node;bestScore=score;}
     }
     if (!best) return null;
-    const titleNode=doc.querySelector('h1') || doc.querySelector('.chapter-title') ||
-      doc.querySelector('[class*="chapter-title"]');
+    const titleNode=doc.querySelector('.chapter-title') ||
+      doc.querySelector('[class*="chapter-title"]') || doc.querySelector('h1');
     const title=(text(titleNode).slice(0,190) || doc.title || 'Chapter').trim();
     const clone=best.cloneNode(true);
     for (const target of clone.querySelectorAll('script,style,iframe,form,button,nav,header,footer,aside,svg,video,canvas,[role="navigation"],.comments,.advertisement,.ads')) {
       target.remove();
     }
-    let html=clone.innerHTML;
-    const plain=text(best);
-    if (html.length > MAX_HTML) html = '<p>'+ plain.slice(0,MAX_HTML/2).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;')+'</p>';
+    const html=clone.innerHTML;
+    const plain=text(clone);
+    if (html.length > MAX_HTML) {
+      throw Error('This chapter exceeds the safe capture size. Nothing was truncated. Save this chapter manually and import the complete file.');
+    }
     if (plain.length<MIN_TEXT) return null;
     return {title,html,plain};
   }
@@ -209,9 +212,9 @@
     if (!same(url)) throw Error('Refusing cross-origin navigation.');
     const normalized=normalize(url);
     if (normalized===normalize(location.href)) {
+      if (challenge(document)) throw Error('Solve the site challenge in this tab, then press Resume.');
       const live=selectContent(document);
       if (live) return {result:live,doc:document};
-      if (challenge(document)) throw Error('Solve the site challenge in this tab, then press Resume.');
     }
     let resp;
     try {
@@ -233,19 +236,37 @@
   }
 
   function findNext(doc, url) {
-    const anchors=[...doc.querySelectorAll('a[href]')];
+    const anchors=[...doc.querySelectorAll('a[href],link[rel~="next"][href]')];
     const candidates=anchors.map(a=>{
       const href=a.getAttribute('href');
       if (!href) return null;
       let resolved;
       try {resolved=new URL(href,url).href;} catch (_) {return null;}
       if(!same(resolved)||normalize(resolved)===normalize(url))return null;
-      const label=(text(a)+' '+(a.getAttribute('rel')||'')+' '+(a.getAttribute('aria-label')||'')+' '+(a.getAttribute('title')||'')).toLowerCase();
-      const s=/(next|следующ|далее|впер[её]д|глава\s*[0-9]+|›|→)/i.test(label)?10:0;
-      return s?{url:resolved,score:s}:null;
+      const rel=(a.getAttribute('rel')||'').toLowerCase().split(/\s+/);
+      const label=(text(a)+' '+(a.getAttribute('aria-label')||'')+' '+(a.getAttribute('title')||'')).toLowerCase();
+      if (rel.includes('prev') || /previous|\bprev\b|предыдущ|назад/.test(label)) return null;
+      const score=rel.includes('next') ? 100 :
+        /\bnext\b|следующ|далее|впер[её]д/.test(label) ? 60 :
+        /^[\s›»→]+$/.test(label) ? 10 : 0;
+      return score?{url:normalize(resolved),score}:null;
     }).filter(Boolean);
     candidates.sort((a,b)=>b.score-a.score);
-    return candidates[0]?.url||null;
+    if (!candidates.length) return null;
+    const strongest=candidates.filter(candidate=>candidate.score===candidates[0].score);
+    const targets=[...new Set(strongest.map(candidate=>candidate.url))];
+    if (targets.length!==1) throw Error('Several different Next links were found. Stopped rather than guessing the chapter order.');
+    if (visited.has(targets[0])) throw Error('The Next link returns to an already collected page. Stopped to avoid a chapter loop.');
+    return targets[0];
+  }
+
+  async function contentSignature(plain) {
+    if (globalThis.crypto?.subtle) {
+      const digest=await globalThis.crypto.subtle.digest('SHA-256',new TextEncoder().encode(plain));
+      return [...new Uint8Array(digest)].map(value=>value.toString(16).padStart(2,'0')).join('');
+    }
+    // Exact comparison on browsers without Web Crypto; never use a prefix.
+    return plain;
   }
 
   async function run() {
@@ -256,22 +277,26 @@
     try {
       while(!stopped && index<max){
         const url=job.urls?.length ? job.urls[index] : currentUrl;
-        if(!url){status('Range completed.');break;}
+        if(!url) throw Error('The chapter list ended before the requested final page.');
         if(!same(url)) throw Error('A chapter URL points to another website.');
+        if(visited.has(normalize(url))) throw Error('This page was already collected. Stopped to avoid a chapter loop.');
         status('Reading '+(index+1)+' / '+(job.urls?.length||max)+'…');
         const {doc,result}=await fetchChapter(url);
         if(stopped)break;
         const plain=result.plain.replace(/\s+/g,' ').trim();
-        const signature=plain.slice(0,500)+':'+plain.length;
-        if(signature===lastTextHash && index>0)
+        const signature=await contentSignature(plain);
+        if(stopped)break;
+        if(contentSignatures.has(signature))
           throw Error('Repeated chapter content detected; stopped to avoid an incorrect EPUB.');
-        lastTextHash=signature;
         const payload={type:'chapter',token:job.token,index,url:normalize(url),title:result.title,html:result.html};
-        captured.push(payload);
+        captured.push({...payload,signature});
+        contentSignatures.add(signature);
+        visited.add(payload.url);
         send(payload);
         index++;
         if(normalize(url)===normalize(job.end)){
-          send({type:'done',token:job.token,count:index});
+          completed=true;
+          send({type:'done',token:job.token,count:index,lastUrl:normalize(url)});
           if(offlineJob || job?.manualMode || !window.opener) {
             status('Done: '+index+' chapters. Saving JSON for Leaf Import files…');
             downloadJson();
@@ -290,6 +315,7 @@
       if(stopped){status('Paused after '+index+' chapters. Click Resume to continue.');}
       else if (index>=max) {status('Stopped at safety limit ('+max+').');send({type:'halt',token:job.token,note:'Safety limit reached before end URL'});}
     } catch(err) {
+      stopped=true;
       status(String(err.message||err));
       send({type:'halt',token:job.token,note:String(err.message||err),index});
     } finally {busy=false;}
@@ -297,7 +323,11 @@
 
   function downloadJson() {
     if(!captured.length){status('No chapters have been collected yet.');return;}
-    const data={title:job?.title||document.title||'Collected chapters',chapters:captured.map(x=>({title:x.title,html:x.html,source:x.url}))};
+    const data={leaf:2,title:job?.title||document.title||'Collected chapters',
+      complete:completed&&captured.length===index,
+      expectedChapters:job?.urls?.length||null,capturedChapters:captured.length,
+      start:job?.start,end:job?.end,
+      chapters:captured.map(x=>({title:x.title,html:x.html,source:x.url}))};
     const blob=new Blob([JSON.stringify(data)],{type:'application/json'});
     const url=URL.createObjectURL(blob);
     const a=document.createElement('a');a.href=url;a.download='leaf-captured-chapters.json';document.body.appendChild(a);
@@ -306,25 +336,45 @@
 
   function acceptJob(data) {
     const urls=Array.isArray(data.urls)?data.urls:[];
-    if(!data.token||!same(data.start)||!same(data.end)||urls.length>MAX||urls.some(x=>!same(x))) {
+    const resumeFrom=Number(data.resumeFrom)||0;
+    if(!data.token||!same(data.start)||!same(data.end)||urls.length>MAX||urls.some(x=>!same(x))||
+        !Number.isInteger(resumeFrom)||resumeFrom<0||resumeFrom>MAX||
+        (urls.length&&(normalize(urls[0])!==normalize(data.start)||
+          normalize(urls[urls.length-1])!==normalize(data.end)||
+          new Set(urls.map(normalize)).size!==urls.length||resumeFrom>urls.length))) {
       status('Invalid job configuration. Start again from Leaf.');return;
     }
-    job=data; currentUrl=job.start;index=Math.max(0,Number(data.resumeFrom)||0);
-    if(urls.length && index>=urls.length){status('All chapters already received.');return;}
+    if(busy){status('Collection is already running. Pause before changing the range.');return;}
+    const sameJob=job?.token===data.token;
+    const retainedCurrent=sameJob&&resumeFrom===index ? currentUrl :
+      sameJob ? captured.find(chapter=>chapter.index===resumeFrom)?.url : null;
+    if(!sameJob)captured=[];
+    else captured=captured.filter(chapter=>chapter.index<resumeFrom);
+    visited=new Set(captured.map(chapter=>chapter.url));
+    contentSignatures=new Set(captured.map(chapter=>chapter.signature));
+    job=data;currentUrl=retainedCurrent||job.start;index=resumeFrom;completed=false;
+    if(urls.length && index===urls.length){
+      completed=true;
+      status('All chapters already received.');
+      send({type:'done',token:job.token,count:index,lastUrl:normalize(job.end)});
+      return;
+    }
     status('Connected to Leaf. Starting collection…');
     void run();
   }
 
   window.addEventListener('message', event=>{
-    if(event.origin!==LEAF_ORIGIN)return;
+    if(event.origin!==LEAF_ORIGIN||!window.opener||event.source!==window.opener)return;
     let data;try{data=typeof event.data==='string'?JSON.parse(event.data):event.data;}catch(_){return;}
-    if(data?.leaf===2 && data.type==='job')acceptJob(data);
+    if(data?.leaf===2 && data.type==='job'&&sessionToken&&data.token===sessionToken)acceptJob(data);
     if(data?.leaf===2 && data.type==='stop' && data.token===job?.token)stopped=true;
   });
 
   window.__leafCaptureV2={resume:()=>{
-    stopped=false;send({type:'hello',token:sessionToken,pageUrl:normalize(location.href)});
-    if(job&&!busy)void run();
+    stopped=false;
+    if(window.opener&&sessionToken&&!offlineJob&&!job?.manualMode){
+      send({type:'hello',token:sessionToken,pageUrl:normalize(location.href)});
+    }else if(job&&!busy)void run();
   }};
   if(offlineJob){
     status('Mobile standalone mode: reading chapters locally. JSON will be saved for Leaf.');

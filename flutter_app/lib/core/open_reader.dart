@@ -35,6 +35,7 @@ class OpenReader {
       'format': 'json',
       'formatversion': '2',
       'origin': '*',
+      'redirects': '1',
     });
   }
 
@@ -69,7 +70,7 @@ class OpenReader {
     if (parsed is! Map || parsed['text'] is! String) {
       throw FormatException('This page has no readable article content: ' + page.toString());
     }
-    final html = extractWikiText(parsed['text'] as String);
+    final html = extractWikiText(parsed['text'] as String, page: page);
     if (_readableLength(html) < 80) {
       throw FormatException('Not enough readable text at ' + page.toString());
     }
@@ -85,13 +86,16 @@ int _readableLength(String html) =>
 
 /// Remove wiki navigation, edit links, templates and page metadata, leaving
 /// the article body. The EPUB's shared sanitizer runs once more on output.
-String extractWikiText(String source) {
+String extractWikiText(String source, {Uri? page}) {
   final fragment = parser.parseFragment(source);
   final base = fragment.querySelector('.mw-parser-output');
   final root = base ?? fragment;
   const hidden = [
     'script', 'style', 'noscript', 'nav', 'footer',
     '.mw-editsection', '.ws-header', '.ws-footer', '.wst-header',
+    '#headertemplate', '.headertemplate', '#ws-footer', '.wst-footer',
+    '.licenseContainer', '.licensetemplate', '.ws-summary',
+    '.wst-toc-table', '.wst-auxtoc', '.ws-toc', '.book-toc',
     '.mw-cite-backlink', '.reference', '.noprint', '.printfooter',
     '.sistersitebox', '.metadata', '.portal', '.navbox',
     '.catlinks', '.shortdescription', '#toc', '.toc',
@@ -100,6 +104,29 @@ String extractWikiText(String source) {
   for (final selector in hidden) {
     for (final element in root.querySelectorAll(selector).toList()) {
       element.remove();
+    }
+  }
+  // Some editions use an ordinary list for their book contents. Remove only
+  // lists/tables made entirely of source-linked descendants of this page;
+  // preserve the ordinary lists that occur inside reading text.
+  if (page != null) {
+    final parentTitle = page.pathSegments.skip(1).join('/').replaceAll('_', ' ');
+    for (final block in root.querySelectorAll('ul, ol, dl, table').toList()) {
+      final anchors = block.querySelectorAll('a[href]');
+      if (anchors.length < 2) continue;
+      final contentsOnly = anchors.every((anchor) {
+        final href = anchor.attributes['href'];
+        if (href == null || href.startsWith('#')) return false;
+        final relative = Uri.tryParse(href);
+        if (relative == null) return false;
+        final target = page.resolveUri(relative);
+        if (target.host != page.host || !OpenReader.supports(target)) {
+          return false;
+        }
+        final title = target.pathSegments.skip(1).join('/').replaceAll('_', ' ');
+        return title.startsWith('$parentTitle/');
+      });
+      if (contentsOnly) block.remove();
     }
   }
   return root.nodes.map((node) {
