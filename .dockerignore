@@ -1,9 +1,0 @@
-.git
-.venv
-upstream
-exports
-.pytest_cache
-**/__pycache__
-**/*.pyc
-flutter_app/.dart_tool
-flutter_app/build
