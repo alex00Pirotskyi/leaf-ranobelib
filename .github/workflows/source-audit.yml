@@ -1,0 +1,28 @@
+name: Public-source browser compatibility audit
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/source-audit.yml
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Probe public reading sources with an actual browser Origin
+        shell: bash
+        run: |
+          set +e
+          function probe() {
+            echo "::group::$1"
+            curl -L -sS --compressed --max-time 20 -o /dev/null -D /tmp/leaf-headers -H 'Origin: https://alex00pirotskyi.github.io' "$2"
+            grep -Ei '^(HTTP/|access-control-allow-origin:|content-type:|server:|cross-origin-opener-policy:|content-security-policy:|x-frame-options:)' /tmp/leaf-headers | tail -16
+            echo "::endgroup::"
+          }
+          probe 'English Wikisource API' 'https://en.wikisource.org/w/api.php?action=parse&page=Pride_and_Prejudice_(1817)%2FChapter_1&prop=text&format=json&formatversion=2&origin=*'
+          probe 'English Wikibooks API' 'https://en.wikibooks.org/w/api.php?action=parse&page=Wikibooks%3AWelcome&prop=text&format=json&formatversion=2&origin=*'
+          probe 'Russian Wikisource API' 'https://ru.wikisource.org/w/api.php?action=query&meta=siteinfo&format=json&origin=*'
+          probe 'Project Gutenberg public HTML' 'https://www.gutenberg.org/cache/epub/1342/pg1342-images.html'
+          probe 'Standard Ebooks reader' 'https://standardebooks.org/ebooks/jane-austen/pride-and-prejudice'
+          probe 'RanobeLIB API' 'https://api.cdnlibs.org/api/manga/202399--okiraku-ryoushu-no-tanoshii-ryouchi-bouei-seisan-kei-majutsu-de-na-mo-naki-mura-wo-saikyou-no-jousai-toshi-ni'
