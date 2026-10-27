@@ -140,6 +140,29 @@ async function verifyDownload(download, filename) {
    ]);
    await verifyDownload(thirdDownload,'standalone_import.epub');
    console.log('SCENARIO 4 PASS');
+
+   console.log('SCENARIO 5: iPhone Safari shows actionable setup rather than a fake 0/23 wait');
+   const safariContext=await browser.newContext({
+     userAgent:'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1',
+     viewport:{width:390,height:844},deviceScaleFactor:3,
+     isMobile:true,hasTouch:true,
+     acceptDownloads:true,
+   });
+   const iphone=await safariContext.newPage();
+   await iphone.goto(SITE,{waitUntil:'domcontentloaded'});
+   await enableAccessibility(iphone);
+   await iphone.getByRole('button',{name:/Try test collector pages/i}).click();
+   await iphone.getByRole('button',{name:/Set up Safari capture/i}).click();
+   await iphone.getByText(/iPhone Safari — capture chapters/i).waitFor({timeout:10000});
+   assert(await iphone.getByText(/Import JSON to make EPUB/i).isVisible(),
+     'Mobile instructions are missing');
+   assert((await iphone.getByText(/Waiting for Leaf Capture in source tab/i).count())===0,
+     'Mobile Safari must not pretend capture is active');
+   assert((await iphone.getByText(/Collecting chapters/i).count())===0,
+     'Mobile Safari must not show fictitious collection progress');
+   await iphone.screenshot({path:path.join(out,'iphone-safari-setup.png'),fullPage:true});
+   await safariContext.close();
+   console.log('SCENARIO 5 PASS');
  }catch(err){
    console.error('SMOKE FAILURE:',err.stack||err);
    try{await page.screenshot({path:path.join(out,'failure.png'),fullPage:true});}catch(_){}
