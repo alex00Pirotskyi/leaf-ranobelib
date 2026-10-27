@@ -39,10 +39,13 @@ jobs:
           flutter create --platforms=web --project-name=leaf_reader .
           flutter pub get
 
+      - name: Run Dart EPUB generator tests
+        working-directory: flutter_app
+        run: flutter test test/epub_builder_test.dart
+
       - name: Build Flutter Web
         working-directory: flutter_app
         env:
-          LEAF_API_URL: ${{ vars.LEAF_API_URL }}
           REPOSITORY_NAME: ${{ github.event.repository.name }}
           ACCOUNT_NAME: ${{ github.repository_owner }}
         run: |
@@ -52,7 +55,7 @@ jobs:
             BASE_HREF="/$REPOSITORY_NAME/"
           fi
           echo "Deploying at $BASE_HREF"
-          flutter build web --release --base-href="$BASE_HREF" --dart-define="API_BASE_URL=$LEAF_API_URL"
+          flutter build web --release --base-href="$BASE_HREF"
           touch build/web/.nojekyll
 
       - name: Configure Pages
