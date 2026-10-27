@@ -240,7 +240,11 @@ async function verifyDownload(download, filename, expected) {
 
 async function search(page, language, query, title) {
   const input = page.getByRole('textbox', { name: /Search books/i });
-  const searchButton = page.getByRole('button', { name: 'Search books', exact: true });
+  // Flutter associates the visible hover tooltip with this button through
+  // aria-owns. The real CI trace retains role=button, but its accessible name
+  // then repeats "Search books". Match the action's label prefix so a tooltip
+  // does not prevent a second genuine click on the same accessible control.
+  const searchButton = page.getByRole('button', { name: /^Search books(?:\s|$)/ });
   await renderedInput(page, input, '');
   await searchButton.click();
   await page.getByText('Start with a good story', { exact: true }).waitFor();
@@ -308,6 +312,16 @@ async function mobileFlow(browser, label, device) {
       return { featuredBooks: await cards.count(), geometry: await assertHealthy(desktop) };
     });
 
+    // These use independent contexts. Run them before the catalogue query so
+    // a remote search failure cannot prevent mobile interaction verification.
+    await scenario('Mobile Chromium: Android layout and explicit Save EPUB gesture', () =>
+      mobileFlow(chrome, 'mobile-chromium', devices['Pixel 7']));
+    const safari = await webkit.launch({ headless: true });
+    browsers.push(safari);
+    await scenario('Mobile WebKit: iPhone layout and explicit Save EPUB gesture', () =>
+      mobileFlow(safari, 'mobile-webkit', devices['iPhone 13']));
+
+    activePage = desktop.page;
     await scenario('English and Russian catalogue search preserves usable fallbacks', async () => ({
       searches: [await search(desktop.page, 'English', 'Alice', "Alice's Adventures in Wonderland"),
         await search(desktop.page, 'Русский', 'Евгений Онегин', 'Евгений Онегин')],
@@ -391,12 +405,6 @@ async function mobileFlow(browser, label, device) {
       await assertHealthy(desktop);
     });
 
-    const safari = await webkit.launch({ headless: true });
-    browsers.push(safari);
-    await scenario('Mobile WebKit: iPhone layout and explicit Save EPUB gesture', () =>
-      mobileFlow(safari, 'mobile-webkit', devices['iPhone 13']));
-    await scenario('Mobile Chromium: Android layout and explicit Save EPUB gesture', () =>
-      mobileFlow(chrome, 'mobile-chromium', devices['Pixel 7']));
   } catch (error) {
     console.error('SMOKE FAILURE:', activeScenario, error.stack || error);
     report.failure = { scenario: activeScenario, error: error.stack || String(error) };
