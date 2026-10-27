@@ -34,11 +34,9 @@ jobs:
           channel: stable
           cache: true
 
-      - name: Generate missing Flutter Web scaffolding
+      - name: Install Dart dependencies
         working-directory: flutter_app
-        run: |
-          flutter create --platforms=web --project-name=leaf_reader .
-          flutter pub get
+        run: flutter pub get
 
       - name: Test catalogue, discovery, imports and EPUB integrity
         working-directory: flutter_app
