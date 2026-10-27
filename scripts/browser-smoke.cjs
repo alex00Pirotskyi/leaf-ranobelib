@@ -152,8 +152,10 @@ async function verifyDownload(download, filename) {
    console.log('SCENARIO 4: import standalone JSON into Leaf, build EPUB locally');
    await page.reload({waitUntil:'domcontentloaded'});
    await enableAccessibility(page);
-   // Flutter ChoiceChip uses radio/toggle semantics rather than button.
-   await page.getByText('Import files',{exact:true}).first().click();
+   // Flutter paints ChoiceChip labels on canvas; this chip doesn't expose
+   // a stable accessibility locator. Test the actual visible hit target
+   // at the fixed CI 1280px desktop viewport.
+   await page.mouse.click(415,345);
    const [chooser]=await Promise.all([
      page.waitForEvent('filechooser',{timeout:20000}),
      page.getByRole('button',{name:/Choose files/i}).click(),
