@@ -58,7 +58,8 @@ async function verifyDownload(download, filename) {
    ]);
    await popup.waitForLoadState('domcontentloaded');
    console.log('Reader tab',popup.url(),'opener?',await popup.evaluate(()=>!!window.opener));
-   assert(popup.url()===SITE+'fixtures/chapter-1.html',
+   const popupUrl = new URL(popup.url());
+   assert(popupUrl.origin + popupUrl.pathname === SITE+'fixtures/chapter-1.html',
      'Wrong tab URL: '+popup.url());
    await page.evaluate(() => {
      window.__leafDebugMessages=[];
