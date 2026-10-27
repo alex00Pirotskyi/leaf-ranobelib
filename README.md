@@ -36,34 +36,50 @@ and manually launch the workflow from **Actions**.
 GitHub Pages hosts the Flutter Web frontend; it cannot run the Python downloader.
 The frontend needs a separately hosted HTTPS backend to generate EPUB files.
 
-### Host the Python backend
+### Fix "HTTP 405 / invalid response": deploy the Python API
 
-A `render.yaml` Blueprint defines the Docker service for Render. Connect the
-`leaf-ranobelib` GitHub repository to Render and deploy the Blueprint. The
-default `starter` plan may incur charges. Use the actual HTTPS URL of your Render
-service; don't assume its hostname.
+The Flutter website is deployed on GitHub Pages, which serves static files only.
+Without a backend URL, the browser sends `POST /api/book/inspect` to GitHub
+Pages, resulting in HTTP 405 rather than JSON. This is a hosting/configuration
+problem, **not** a book URL problem.
 
-The backend should be configured with:
+To deploy the backend using Render's free instance for personal/hobby use:
 
-```text
-LEAF_ALLOWED_ORIGINS=https://alex00pirotskyi.github.io
-```
+1. Sign in at [Render](https://dashboard.render.com/), select **New → Blueprint**.
+2. Connect the GitHub repository `alex00Pirotskyi/leaf-ranobelib`.
+3. Select `render.yaml`; it now uses `Dockerfile.api` (Python only, no Flutter compilation) and `plan: free`.
+4. Confirm the deployment and copy the actual service HTTPS address from Render.
+5. Open `https://YOUR-RENDER-SERVICE.onrender.com/api/health` (substituting your real host). It must show `"status":"ok"` and `"downloader_installed":true`.
 
-The backend currently has no user login. CORS is not access control, so don't
-expose it publicly without considering authentication and usage limits.
+Render free instances go idle and can take roughly a minute to wake up, and
+the filesystem is ephemeral. Free service limits apply. The backend permits
+cross-origin requests from `https://alex00pirotskyi.github.io` using
+`LEAF_ALLOWED_ORIGINS` (configured in `render.yaml`).
+
+**Security:** the API currently has no login; public visitors can initiate
+downloading jobs. Do not use as a publicly advertised service without
+authentication, request limits or additional access controls.
 
 ### Connect Flutter to the backend
 
-After deploying Render, set the GitHub Actions repository variable `LEAF_API_URL`
-under **Settings → Secrets and variables → Actions → Variables** to the actual
-backend HTTPS origin (without a trailing slash). Or run:
+After the Python backend is running, visit
+`https://alex00pirotskyi.github.io/leaf-ranobelib/`. Open **Server settings**
+at the top of the app, paste the Render HTTPS origin (no `/api` or trailing
+path), and select **Connect server**. The app checks `/api/health` and saves
+the URL in your browser. You no longer need to rebuild Flutter just to enter
+or change the backend URL.
+
+For a shared default API URL (so users don't have to enter it individually),
+configure `LEAF_API_URL` in GitHub repository **Settings → Secrets and
+variables → Actions → Variables** to your Render HTTPS origin. Or use:
 
 ```powershell
 make pages-api-url LEAF_API_URL=https://your-actual-service.onrender.com
 ```
 
-Rerun **Actions → Deploy Flutter Web to GitHub Pages → Run workflow** so the
-frontend includes the new API address.
+Rerun **Actions → Deploy Flutter Web to GitHub Pages → Run workflow** to bake
+the default endpoint into the static build. A browser-saved URL takes
+precedence over the build-time default.
 
 **Windows Docker error:** The local command `make` starts Docker containers, and
 requires Docker Desktop. GitHub Pages compilation uses GitHub's runner and does not
