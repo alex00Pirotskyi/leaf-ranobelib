@@ -9,6 +9,8 @@
   }
 
   const LEAF_ORIGIN = 'https://alex00pirotskyi.github.io';
+  const sessionToken=(new URLSearchParams(location.hash.slice(1))).get('leaf_session') || '';
+  const offlineJob=window.__leafOfflineJobV2 || null;
   const MAX = 120;
   const MIN_TEXT = 150;
   const PACE_MS = 1200;
@@ -239,7 +241,12 @@
         index++;
         if(normalize(url)===normalize(job.end)){
           send({type:'done',token:job.token,count:index});
-          status('Complete: '+index+' chapters sent to Leaf. Your EPUB is being created.');
+          if(offlineJob || !window.opener) {
+            status('Done: '+index+' chapters. Saving JSON for Leaf Import files…');
+            downloadJson();
+          } else {
+            status('Complete: '+index+' chapters sent to Leaf. Your EPUB is being created.');
+          }
           return;
         }
         if(!job.urls?.length){
@@ -285,13 +292,16 @@
   });
 
   window.__leafCaptureV2={resume:()=>{
-    stopped=false;send({type:'hello',pageUrl:location.href});
+    stopped=false;send({type:'hello',token:sessionToken,pageUrl:normalize(location.href)});
     if(job&&!busy)void run();
   }};
-  if(!window.opener) {
-    status('Leaf tab connection unavailable (site COOP policy or separate tab). Open this chapter using the Open reader button in Leaf, then click your Leaf Capture bookmark again.');
+  if(offlineJob){
+    status('Mobile standalone mode: reading chapters locally. JSON will be saved for Leaf.');
+    acceptJob(offlineJob);
+  } else if(!window.opener) {
+    status('No Leaf tab connection. Use the personalized mobile helper from Leaf, or Export JSON after collecting chapters.');
   } else {
     status('Connected to chapter page. Requesting range from Leaf…');
-    send({type:'hello',pageUrl:location.href});
+    send({type:'hello',token:sessionToken,pageUrl:normalize(location.href)});
   }
 })();
