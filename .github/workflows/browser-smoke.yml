@@ -1,0 +1,49 @@
+name: Real browser end-to-end smoke
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/browser-smoke.yml
+      - scripts/browser-smoke.cjs
+permissions:
+  contents: read
+jobs:
+  live:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install Chromium browser automation for testing only
+        run: |
+          npm install --no-save playwright
+          npx playwright install chromium
+      - name: Test actual live GitHub Pages site
+        run: node scripts/browser-smoke.cjs
+      - name: Check EPUB contents from live browser downloads
+        if: success()
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          from zipfile import ZipFile
+          folder=Path("smoke-artifacts")
+          for name in ("wikimedia_demo.epub", "bookmarklet_fixture.epub"):
+              file=folder/name
+              with ZipFile(file) as z:
+                  names=z.namelist()
+                  assert names[0]=="mimetype", names[:4]
+                  assert z.read("mimetype")==b"application/epub+zip"
+                  assert "OEBPS/nav.xhtml" in names
+                  chapters=[p for p in names if p.startswith("OEBPS/c") and p.endswith(".xhtml")]
+                  assert len(chapters)==3,(name,chapters)
+                  print(name, "PASS",len(chapters),"chapters",file.stat().st_size,"bytes")
+          PY
+      - name: Upload smoke logs and downloaded EPUBs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: leaf-smoke-artifacts
+          path: smoke-artifacts/
+          if-no-files-found: ignore
