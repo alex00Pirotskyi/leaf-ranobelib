@@ -1,7 +1,7 @@
 name: leaf_reader
 publish_to: none
-description: A minimal Flutter Web interface for the open-source RanobeLIB Downloader.
-version: 1.0.0+1
+description: Browser-only EPUB creation with Flutter and Dart. No server required.
+version: 2.0.0+1
 
 environment:
   sdk: '>=3.4.0 <4.0.0'
@@ -9,6 +9,8 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  archive: ^4.5.2
+  html: ^0.15.6
   http: ^1.3.0
 
 flutter:
