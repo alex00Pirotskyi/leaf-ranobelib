@@ -1,0 +1,13 @@
+# Deploy this blueprint from https://dashboard.render.com/select-repo?type=blueprint
+# This backend is publicly reachable: protect it using access controls before broad use.
+services:
+  - type: web
+    name: leaf-ranobelib-api
+    runtime: docker
+    plan: starter
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /api/health
+    envVars:
+      - key: LEAF_ALLOWED_ORIGINS
+        value: https://alex00pirotskyi.github.io
