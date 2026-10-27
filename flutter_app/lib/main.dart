@@ -798,7 +798,7 @@ class _LeafHomeState extends State<LeafHome> {
     controller:c,enabled:!_busy,
     keyboardType:TextInputType.url,
     onChanged:(v) {
-      if ((c==_first||c==_last) && _mobilePrepared) {
+      if (c==_first || c==_last) {
         setState(() => _mobilePrepared = false);
       }
     },
