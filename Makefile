@@ -7,6 +7,8 @@ SHELL := /bin/sh
 
 GITHUB_OWNER ?= alex00Pirotskyi
 REPO_NAME ?= leaf-ranobelib
+PAGES_REPO := $(GITHUB_OWNER).github.io
+LEAF_API_URL ?=
 GITHUB_REPO := $(GITHUB_OWNER)/$(REPO_NAME)
 GITHUB_REMOTE := https://github.com/$(GITHUB_REPO).git
 PYTHON ?= python3
@@ -15,7 +17,7 @@ DEV_PYTHON := $(if $(wildcard $(VENV_PYTHON)),$(VENV_PYTHON),$(PYTHON))
 COMPOSE ?= docker compose
 FLUTTER ?= flutter
 
-.PHONY: up start down stop restart rebuild logs ps health setup backend web dev build-web test git-status git-remote github-create github-push clean help
+.PHONY: up start down stop restart rebuild logs ps health setup backend web dev build-web test git-status git-remote github-create github-push github-rename-pages pages-api-url pages-open clean help
 
 up: ## Build and start app (http://localhost:8080)
 	$(COMPOSE) up --build -d
@@ -84,6 +86,18 @@ github-create: ## Create a PRIVATE GitHub repo and push (needs gh auth login)
 github-push: ## Push the project to the already-created GitHub repository
 	@git remote set-url origin "$(GITHUB_REMOTE)"
 	@git push --set-upstream origin main
+
+github-rename-pages: ## Rename existing GitHub repo to the root Pages domain (requires gh)
+	@gh repo rename "$(PAGES_REPO)" --repo "$(GITHUB_REPO)" --yes
+	@git remote set-url origin "https://github.com/$(GITHUB_OWNER)/$(PAGES_REPO).git"
+	@echo "Root Pages repository: https://github.com/$(GITHUB_OWNER)/$(PAGES_REPO)"
+
+pages-api-url: ## Set GitHub Actions variable; e.g. make pages-api-url LEAF_API_URL=https://my-api.onrender.com
+	@test -n "$(LEAF_API_URL)" || { echo "Missing LEAF_API_URL=https://your-backend.onrender.com"; exit 1; }
+	@gh variable set LEAF_API_URL --body "$(LEAF_API_URL)" --repo "$(GITHUB_REPO)"
+
+pages-open: ## Open the root Pages address
+	@echo "https://$(shell echo $(GITHUB_OWNER) | tr '[:upper:]' '[:lower:]').github.io/"
 
 clean: ## Remove generated local files only (never Docker volumes)
 	rm -rf flutter_app/build flutter_app/.dart_tool .pytest_cache
