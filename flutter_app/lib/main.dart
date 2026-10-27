@@ -200,7 +200,7 @@ class LeafApi {
   }
 
   Future<void> verifyBackend() async {
-    final response = await _client.get(uri('/api/health')).timeout(const Duration(seconds: 15));
+    final response = await _client.get(uri('/api/health')).timeout(const Duration(seconds: 100));
     final result = _decode(response);
     if (result['status'] != 'ok') {
       throw Exception('This server is not a working Leaf API.');
@@ -514,7 +514,7 @@ class _ReaderHomeState extends State<ReaderHome> {
       const SizedBox(height: 11),
       const Text(
         'GitHub Pages only hosts the website. To find chapters and create EPUB files, '
-        'Leaf also needs its Python backend hosted at an HTTPS address.',
+        'Leaf also needs its Python backend hosted at an HTTPS address. A free hosted server may take a minute to wake up.',
         style: TextStyle(color: _muted, fontSize: 12, height: 1.6),
       ),
       const SizedBox(height: 19),
