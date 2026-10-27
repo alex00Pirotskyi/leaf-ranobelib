@@ -334,6 +334,19 @@ class _LeafHomeState extends State<LeafHome> {
     });
   }
 
+  void _sampleCapture() {
+    if (_busy) return;
+    setState(() {
+      _first.text = 'https://alex00pirotskyi.github.io/leaf-ranobelib/fixtures/chapter-1.html';
+      _last.text = 'https://alex00pirotskyi.github.io/leaf-ranobelib/fixtures/chapter-3.html';
+      _title.text = 'Leaf Sample Archive';
+      _author.text = 'Leaf Open Demo';
+      _error = null;
+      _status = 'Browser-assisted test: three original chapters on Leaf. '
+          'Press Collect, then activate Leaf Capture in the opened tab.';
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     final compact = MediaQuery.sizeOf(context).width < 740;
@@ -420,6 +433,9 @@ class _LeafHomeState extends State<LeafHome> {
       TextButton.icon(onPressed:_busy?null:_demo,
         icon:const Icon(Icons.science_outlined,size:17),
         label:const Text('Try the open-book demo (3 chapters)')),
+      TextButton.icon(onPressed:_busy?null:_sampleCapture,
+        icon:const Icon(Icons.travel_explore_outlined,size:17),
+        label:const Text('Try test collector pages (3 chapters)')),
       const SizedBox(height:14),
       _label('BOOK TITLE'),const SizedBox(height:7),
       _field(_title,'Book title'),
