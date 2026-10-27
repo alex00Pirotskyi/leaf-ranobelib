@@ -83,8 +83,7 @@ github-create: ## Create a PRIVATE GitHub repo and push (needs gh auth login)
 	@git push --set-upstream origin main
 
 # Use when the repo already exists (created in the GitHub web UI).
-github-push: ## Push the project to the already-created GitHub repository
-	@git remote set-url origin "$(GITHUB_REMOTE)"
+github-push: ## Push main to current origin (also works after Pages rename)
 	@git push --set-upstream origin main
 
 github-rename-pages: ## Rename existing GitHub repo to the root Pages domain (requires gh)
@@ -94,7 +93,7 @@ github-rename-pages: ## Rename existing GitHub repo to the root Pages domain (re
 
 pages-api-url: ## Set GitHub Actions variable; e.g. make pages-api-url LEAF_API_URL=https://my-api.onrender.com
 	@test -n "$(LEAF_API_URL)" || { echo "Missing LEAF_API_URL=https://your-backend.onrender.com"; exit 1; }
-	@gh variable set LEAF_API_URL --body "$(LEAF_API_URL)" --repo "$(GITHUB_REPO)"
+	@gh variable set LEAF_API_URL --body "$(LEAF_API_URL)" --repo "$(gh repo view --json nameWithOwner --jq .nameWithOwner)"
 
 pages-open: ## Open the root Pages address
 	@echo "https://$(shell echo $(GITHUB_OWNER) | tr '[:upper:]' '[:lower:]').github.io/"
