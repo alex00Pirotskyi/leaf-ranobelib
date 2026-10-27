@@ -107,23 +107,89 @@ class ExportJob {
 
 class LeafApi {
   static const _configured = String.fromEnvironment('API_BASE_URL');
+  static const _storageKey = 'leaf_backend_url_v1';
   final http.Client _client = http.Client();
-  String get baseUrl => _configured.isNotEmpty ? _configured : Uri.base.origin;
+  String? _savedUrl;
 
-  Uri uri(String path) => Uri.parse('$baseUrl$path');
+  LeafApi() {
+    try {
+      _savedUrl = html.window.localStorage[_storageKey];
+    } catch (_) {
+      // Storage may be blocked by privacy settings.
+    }
+  }
+
+  bool get isGithubPages => Uri.base.host.toLowerCase().endsWith('.github.io');
+  bool get hasConfiguredBackend =>
+      (_savedUrl?.trim().isNotEmpty ?? false) || _configured.trim().isNotEmpty;
+  bool get needsBackend => isGithubPages && !hasConfiguredBackend;
+
+  String get baseUrl {
+    if (_savedUrl?.trim().isNotEmpty ?? false) return _savedUrl!.trim();
+    if (_configured.trim().isNotEmpty) {
+      return _configured.trim().replaceFirst(RegExp(r'/$'), '');
+    }
+    return Uri.base.origin;
+  }
+
+  void setBackendUrl(String input) {
+    final url = input.trim();
+    final parsed = Uri.tryParse(url);
+    final local = parsed != null &&
+        (parsed.host == 'localhost' || parsed.host == '127.0.0.1');
+    if (parsed == null ||
+        !(parsed.scheme == 'https' || (local && parsed.scheme == 'http')) ||
+        parsed.host.isEmpty ||
+        parsed.userInfo.isNotEmpty ||
+        parsed.host.toLowerCase().endsWith('.github.io') ||
+        (parsed.path.isNotEmpty && parsed.path != '/') ||
+        parsed.hasQuery || parsed.hasFragment) {
+      throw const FormatException(
+        'Enter the HTTPS URL of the Python API (e.g. https://your-api.onrender.com), without /api.',
+      );
+    }
+    _savedUrl = url.replaceFirst(RegExp(r'/$'), '');
+    try {
+      html.window.localStorage[_storageKey] = _savedUrl!;
+    } catch (_) {
+      // Keep the URL for this session.
+    }
+  }
+
+  Uri uri(String path) {
+    if (needsBackend) {
+      throw StateError(
+        'Python backend not connected. GitHub Pages only hosts the website. Configure the HTTPS API in Server settings.',
+      );
+    }
+    return Uri.parse('$baseUrl$path');
+  }
 
   Map<String, dynamic> _decode(http.Response response) {
     dynamic value;
     try {
       value = jsonDecode(utf8.decode(response.bodyBytes));
     } catch (_) {
-      throw Exception('Server returned an invalid response (${response.statusCode}).');
+      if (response.statusCode == 405) {
+        throw Exception(
+          'HTTP 405: this address cannot serve the Leaf API. GitHub Pages cannot run Python. Connect your backend in Server settings.',
+        );
+      }
+      throw Exception(
+        'HTTP ' + response.statusCode.toString() +
+        ': non-JSON response from $baseUrl. Check the Python API URL.',
+      );
     }
     if (response.statusCode >= 400) {
       final detail = (value is Map ? value['detail'] : null);
-      throw Exception(detail is String ? detail : 'Server error (${response.statusCode}).');
+      throw Exception(detail is String
+          ? detail
+          : 'API request failed (HTTP ' + response.statusCode.toString() + ').');
     }
-    return Map<String, dynamic>.from(value as Map);
+    if (value is! Map) {
+      throw Exception('Unexpected API response format.');
+    }
+    return Map<String, dynamic>.from(value);
   }
 
   Future<Map<String, dynamic>> _post(String path, Map<String, dynamic> body) async {
@@ -131,6 +197,17 @@ class LeafApi {
         .post(uri(path), headers: {'Content-Type': 'application/json'}, body: jsonEncode(body))
         .timeout(const Duration(seconds: 50));
     return _decode(response);
+  }
+
+  Future<void> verifyBackend() async {
+    final response = await _client.get(uri('/api/health')).timeout(const Duration(seconds: 15));
+    final result = _decode(response);
+    if (result['status'] != 'ok') {
+      throw Exception('This server is not a working Leaf API.');
+    }
+    if (result['downloader_installed'] != true) {
+      throw Exception('The API is online, but RanobeLIB downloader is not installed.');
+    }
   }
 
   Future<Book> inspect(String url) async =>
@@ -147,6 +224,7 @@ class LeafApi {
   Future<void> cancel(String id) async {
     await _post('/api/jobs/$id/cancel', {});
   }
+
   void dispose() => _client.close();
 }
 
