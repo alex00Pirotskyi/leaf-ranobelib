@@ -88,14 +88,24 @@ async function enableAccessibility(page) {
 }
 
 async function renderedInput(page, input, value) {
-  await input.fill(value);
-  // A controlled Flutter field processes its DOM editing event before the
-  // next render. Do not send Enter in the same event burst (the failed trace
-  // submitted Cyrillic text just 7 ms after fill). Wait for the rendered field
-  // and then use the visible Search action, as a user can on any keyboard.
+  await page.bringToFront();
+  await input.click();
+  // Flutter attaches its input handlers during the semantics update after
+  // focus. CI recorded fill("Alice") briefly changing the DOM, then reverting
+  // to empty because that event preceded handler attachment. Let real focus
+  // render before sending ordinary selection, deletion and typing events.
   await page.evaluate(() => new Promise(resolve =>
     requestAnimationFrame(() => requestAnimationFrame(resolve))));
-  assert(await input.inputValue() === value, 'The rendered search field did not retain the entered text.');
+  assert(await input.evaluate(element => document.activeElement === element),
+    'The rendered search field did not receive keyboard focus.');
+  await input.press('ControlOrMeta+A');
+  await input.press('Backspace');
+  if (value) await input.pressSequentially(value, { delay: 75 });
+  await page.evaluate(() => new Promise(resolve =>
+    requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  const actual = await input.inputValue();
+  assert(actual === value, 'The rendered search field did not retain the entered text: ' +
+    JSON.stringify({ expected: value, actual }));
 }
 
 async function openHome(page) {
