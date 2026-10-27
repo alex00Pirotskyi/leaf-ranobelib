@@ -1,0 +1,28 @@
+name: Check RanobeLIB Browser Access
+on:
+  push:
+    paths:
+      - ".github/workflows/cors-check.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  cors:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check direct browser CORS response and preflight
+        shell: bash
+        run: |
+          URL="https://api.cdnlibs.org/api/manga/202399--okiraku-ryoushu-no-tanoshii-ryouchi-bouei-seisan-kei-majutsu-de-na-mo-naki-mura-wo-saikyou-no-jousai-toshi-ni"
+          echo "=== Simple cross-origin GET ==="
+          curl --location --max-time 15 --silent --show-error --output /dev/null --dump-header - \
+            -H "Origin: https://alex00pirotskyi.github.io" "$URL" | grep -Ei "^(HTTP/|access-control-|vary:|content-type:|location:|server:)" || true
+          echo "=== Cross-origin GET with Site-Id header (preflight) ==="
+          curl --max-time 15 --silent --show-error --output /dev/null --dump-header - -X OPTIONS \
+            -H "Origin: https://alex00pirotskyi.github.io" \
+            -H "Access-Control-Request-Method: GET" \
+            -H "Access-Control-Request-Headers: site-id" "$URL" | grep -Ei "^(HTTP/|access-control-|vary:|content-type:|location:|server:)" || true
+          echo "=== Cross-origin GET without Site-Id status ==="
+          curl --location --max-time 15 --silent --show-error --output /dev/null \
+            --write-out "HTTP status %{http_code}; downloaded %{size_download} bytes\n" \
+            -H "Origin: https://alex00pirotskyi.github.io" "$URL"
