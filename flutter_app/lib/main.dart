@@ -349,7 +349,7 @@ class _ReaderHomeState extends State<ReaderHome> {
         child: const Icon(Icons.menu_book_rounded, size: 19, color: Color(0xFFF3F3E8)),
       ),
       const SizedBox(width: 11),
-      const Text('leaf.', style: TextStyle(fontSize: 23, color: _ink, fontWeight: FontWeight.w750, letterSpacing: -1.2)),
+      const Text('leaf.', style: TextStyle(fontSize: 23, color: _ink, fontWeight: FontWeight.w700, letterSpacing: -1.2)),
       const Spacer(),
       if (!compact) const Text('Made for the joy of reading', style: TextStyle(color: _muted, fontSize: 12)),
       if (!compact) const SizedBox(width: 22),
@@ -534,7 +534,7 @@ class _ReaderHomeState extends State<ReaderHome> {
   Widget _rangeField(String title, TextEditingController controller) => Column(
     crossAxisAlignment: CrossAxisAlignment.start,
     children: [
-      Text(title, style: const TextStyle(color: _muted, fontWeight: FontWeight.w650, fontSize: 10, letterSpacing: 1.2)),
+      Text(title, style: const TextStyle(color: _muted, fontWeight: FontWeight.w600, fontSize: 10, letterSpacing: 1.2)),
       const SizedBox(height: 7),
       TextField(controller: controller, keyboardType: TextInputType.number,
         inputFormatters: [FilteringTextInputFormatter.digitsOnly],
@@ -548,7 +548,7 @@ class _ReaderHomeState extends State<ReaderHome> {
       Expanded(child: Padding(
         padding: const EdgeInsets.symmetric(vertical: 10),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text(title, style: const TextStyle(color: _ink, fontWeight: FontWeight.w650, fontSize: 13)),
+          Text(title, style: const TextStyle(color: _ink, fontWeight: FontWeight.w600, fontSize: 13)),
           const SizedBox(height: 3),
           Text(caption, style: const TextStyle(color: _muted, fontSize: 11)),
         ]),
@@ -624,7 +624,7 @@ class _ReaderHomeState extends State<ReaderHome> {
     children: [
       Container(width: 32, height: 32, alignment: Alignment.center,
         decoration: BoxDecoration(color: const Color(0xFFE9EEE8), borderRadius: BorderRadius.circular(9)),
-        child: Text(number, style: const TextStyle(color: _pine, fontWeight: FontWeight.w750, fontSize: 12))),
+        child: Text(number, style: const TextStyle(color: _pine, fontWeight: FontWeight.w700, fontSize: 12))),
       const SizedBox(width: 11),
       Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Text(title, style: const TextStyle(fontFamily: 'Georgia', color: _ink, fontSize: 21)),
@@ -681,7 +681,7 @@ class _Pill extends StatelessWidget {
     child: Row(mainAxisSize: MainAxisSize.min, children: [
       Icon(icon, color: _pine, size: dot ? 6 : 13),
       const SizedBox(width: 6),
-      Text(label, style: const TextStyle(color: _pine, fontSize: 10, fontWeight: FontWeight.w750, letterSpacing: 0.7)),
+      Text(label, style: const TextStyle(color: _pine, fontSize: 10, fontWeight: FontWeight.w700, letterSpacing: 0.7)),
     ]),
   );
 }
@@ -691,7 +691,7 @@ class _Label extends StatelessWidget {
   const _Label(this.text);
   @override
   Widget build(BuildContext context) => Text(text,
-    style: const TextStyle(color: _muted, fontSize: 10, fontWeight: FontWeight.w750, letterSpacing: 1.5));
+    style: const TextStyle(color: _muted, fontSize: 10, fontWeight: FontWeight.w700, letterSpacing: 1.5));
 }
 
 class _Feature extends StatelessWidget {
@@ -720,7 +720,7 @@ class _PrimaryButton extends StatelessWidget {
       disabledBackgroundColor: const Color(0xFFB6BDB6),
       minimumSize: const Size(100, 51),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      textStyle: const TextStyle(fontWeight: FontWeight.w650, fontSize: 13),
+      textStyle: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
     ),
     child: Row(mainAxisAlignment: MainAxisAlignment.center, mainAxisSize: MainAxisSize.min, children: [
       if (busy) ...[
