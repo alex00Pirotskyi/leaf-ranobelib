@@ -241,6 +241,10 @@ class _ReaderHomeState extends State<ReaderHome> {
   final _url = TextEditingController(text: _bookUrl);
   final _start = TextEditingController(text: '1');
   final _end = TextEditingController();
+  late final TextEditingController _backendUrl;
+  bool _showBackendSettings = false;
+  bool _connecting = false;
+  String? _backendNotice;
   Timer? _ticker;
   Book? _book;
   ExportJob? _job;
@@ -263,13 +267,47 @@ class _ReaderHomeState extends State<ReaderHome> {
   bool get _active => _job?.status == 'running' || _job?.status == 'queued';
 
   @override
+  void initState() {
+    super.initState();
+    _backendUrl = TextEditingController(
+      text: _api.hasConfiguredBackend ? _api.baseUrl : '',
+    );
+    _showBackendSettings = _api.needsBackend;
+  }
+
+  @override
   void dispose() {
     _ticker?.cancel();
     _api.dispose();
     _url.dispose();
     _start.dispose();
     _end.dispose();
+    _backendUrl.dispose();
     super.dispose();
+  }
+
+  Future<void> _connectBackend() async {
+    if (_connecting || _active) return;
+    setState(() {
+      _connecting = true;
+      _backendNotice = null;
+      _message = null;
+    });
+    try {
+      _api.setBackendUrl(_backendUrl.text);
+      await _api.verifyBackend();
+      if (!mounted) return;
+      setState(() {
+        _backendNotice = 'Connected to Python downloader.';
+        _showBackendSettings = false;
+        _book = null;
+        _job = null;
+      });
+    } catch (e) {
+      if (mounted) setState(() => _backendNotice = _friendlyError(e));
+    } finally {
+      if (mounted) setState(() => _connecting = false);
+    }
   }
 
   Future<void> _inspect() async {
@@ -300,8 +338,9 @@ class _ReaderHomeState extends State<ReaderHome> {
 
   String _friendlyError(Object e) {
     final text = e.toString().replaceFirst(RegExp(r'^Exception: '), '');
-    if (text.contains('Failed host lookup') || text.contains('XMLHttpRequest')) {
-      return 'Cannot reach the backend. Make sure the Python server is running.';
+    if (text.contains('Failed host lookup') || text.contains('XMLHttpRequest') ||
+        text.contains('ClientException') || text.contains('Failed to fetch')) {
+      return 'Cannot reach the Python API. Check its HTTPS URL, hosting status, and allowed CORS origin.';
     }
     return text;
   }
@@ -395,6 +434,13 @@ class _ReaderHomeState extends State<ReaderHome> {
                 _header(compact),
                 const SizedBox(height: 52),
                 _hero(compact),
+                if (_api.needsBackend || _showBackendSettings) ...[
+                  const SizedBox(height: 24),
+                  _backendSettingsCard(),
+                ] else if (_backendNotice != null) ...[
+                  const SizedBox(height: 19),
+                  Text(_backendNotice!, style: const TextStyle(color: _pine, fontSize: 12)),
+                ],
                 const SizedBox(height: 37),
                 if (compact) ...[
                   _sourceCard(),
@@ -431,7 +477,16 @@ class _ReaderHomeState extends State<ReaderHome> {
       const Spacer(),
       if (!compact) const Text('Made for the joy of reading', style: TextStyle(color: _muted, fontSize: 12)),
       if (!compact) const SizedBox(width: 22),
-      const _Pill(label: 'WEB APP', icon: Icons.circle, dot: true),
+      TextButton.icon(
+        onPressed: _active ? null : () => setState(() {
+          _showBackendSettings = !_showBackendSettings;
+          _backendNotice = null;
+        }),
+        icon: Icon(_api.needsBackend ? Icons.cloud_off_outlined : Icons.dns_outlined, size: 16),
+        label: Text(compact ? 'API' : 'Server settings', style: const TextStyle(fontSize: 12)),
+      ),
+      if (!compact) const SizedBox(width: 10),
+      if (!compact) const _Pill(label: 'WEB APP', icon: Icons.circle, dot: true),
     ]),
   );
 
@@ -447,6 +502,55 @@ class _ReaderHomeState extends State<ReaderHome> {
         style: TextStyle(fontSize: 15, height: 1.7, color: _muted)),
     ),
   ]);
+
+  Widget _backendSettingsCard() => _Surface(
+    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Row(children: [
+        const Icon(Icons.cloud_outlined, color: _pine, size: 23),
+        const SizedBox(width: 11),
+        const Expanded(child: Text('Connect the EPUB server',
+          style: TextStyle(fontFamily: 'Georgia', fontSize: 20, color: _ink))),
+      ]),
+      const SizedBox(height: 11),
+      const Text(
+        'GitHub Pages only hosts the website. To find chapters and create EPUB files, '
+        'Leaf also needs its Python backend hosted at an HTTPS address.',
+        style: TextStyle(color: _muted, fontSize: 12, height: 1.6),
+      ),
+      const SizedBox(height: 19),
+      const _Label('PYTHON API URL'),
+      const SizedBox(height: 8),
+      TextField(
+        controller: _backendUrl,
+        keyboardType: TextInputType.url,
+        autocorrect: false,
+        enabled: !_connecting && !_active,
+        style: const TextStyle(color: _ink, fontSize: 13),
+        decoration: const InputDecoration(
+          hintText: 'https://your-api.onrender.com',
+          prefixIcon: Icon(Icons.link_rounded, size: 18, color: _muted),
+        ),
+        onSubmitted: (_) => _connectBackend(),
+      ),
+      const SizedBox(height: 13),
+      SizedBox(
+        width: double.infinity,
+        child: _PrimaryButton(
+          text: _connecting ? 'Checking server…' : 'Connect server',
+          icon: _connecting ? null : Icons.check_rounded,
+          busy: _connecting,
+          onPressed: _connecting || _active ? null : _connectBackend,
+        ),
+      ),
+      if (_backendNotice != null) ...[
+        const SizedBox(height: 11),
+        Text(_backendNotice!, style: const TextStyle(fontSize: 12, color: _ink, height: 1.5)),
+      ],
+      const SizedBox(height: 13),
+      const Text('The server URL is stored in this browser. Do not enter a GitHub Pages URL here.',
+        style: TextStyle(fontSize: 11, color: _muted)),
+    ]),
+  );
 
   Widget _sourceCard() => _Surface(
     child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
