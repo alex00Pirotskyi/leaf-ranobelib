@@ -26,9 +26,16 @@ jobs: dict[str, "Job"] = {}
 MAX_JOBS = 30
 
 app = FastAPI(title="Leaf · RanobeLIB to EPUB", docs_url="/api/docs", redoc_url=None)
+_allowed_origins = [
+    origin.strip().rstrip("/")
+    for origin in os.getenv("LEAF_ALLOWED_ORIGINS", "").split(",")
+    if origin.strip()
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$",
+    allow_origins=_allowed_origins,
+    allow_origin_regex=r"^https?://(localhost|127\\.0\\.0\\.1)(:\\d+)?$",
     allow_methods=["GET", "POST"],
     allow_headers=["Content-Type"],
 )
