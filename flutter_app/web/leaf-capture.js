@@ -129,7 +129,8 @@
     const clues=['captcha','ddos-guard','verify you are human',
       'checking your browser','подтвердите, что вы человек',
       'проверка безопасности','cloudflare','access denied'];
-    return clues.some(x=>str.includes(x)) && !selectContent(doc);
+    return clues.some(x=>str.includes(x)) &&
+      (str.length<1200 || /captcha|ddos-guard|verify you are human|checking your browser|access denied/.test((doc.title||'').toLowerCase()));
   }
 
   function selectorFor(el) {
@@ -280,13 +281,13 @@
   });
 
   window.__leafCaptureV2={resume:()=>{
-    stopped=false;send({type:'hello'});
+    stopped=false;send({type:'hello',pageUrl:location.href});
     if(job&&!busy)void run();
   }};
   if(!window.opener) {
     status('Leaf tab connection unavailable (site COOP policy or separate tab). Open this chapter using the Open reader button in Leaf, then click your Leaf Capture bookmark again.');
   } else {
     status('Connected to chapter page. Requesting range from Leaf…');
-    send({type:'hello'});
+    send({type:'hello',pageUrl:location.href});
   }
 })();
