@@ -41,7 +41,10 @@ jobs:
 
       - name: Run Dart EPUB generator tests
         working-directory: flutter_app
-        run: flutter test test/epub_builder_test.dart
+        run: flutter test test/
+
+      - name: Validate bookmarklet JavaScript
+        run: node --check flutter_app/web/leaf-capture.js
 
       - name: Build Flutter Web
         working-directory: flutter_app
