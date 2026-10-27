@@ -29,7 +29,7 @@ jobs:
           from pathlib import Path
           from zipfile import ZipFile
           folder=Path("smoke-artifacts")
-          for name in ("wikimedia_demo.epub", "bookmarklet_fixture.epub"):
+          for name in ("wikimedia_demo.epub", "bookmarklet_fixture.epub", "standalone_import.epub"):
               file=folder/name
               with ZipFile(file) as z:
                   names=z.namelist()
