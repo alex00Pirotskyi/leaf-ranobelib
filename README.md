@@ -1,70 +1,109 @@
-# Leaf — Flutter Web EPUB Maker
+# leaf. — Chapter URLs → EPUB, right in Flutter Web
 
-A minimalist, browser-only EPUB maker built with **Flutter and Dart**.
+**Live:** https://alex00pirotskyi.github.io/leaf-ranobelib/
 
-**Live project:** https://alex00pirotskyi.github.io/leaf-ranobelib/
+A minimal Flutter Web application that turns a range of accessible reading pages into an EPUB. No Python, Render, Docker, or central conversion backend. EPUB generation, chapter ordering, content cleaning, ZIP creation, and local download all run in Dart in your browser.
 
-No Python backend, Docker, Render, login, cookies, or cloud processing. The EPUB ZIP is assembled locally in the browser using the Dart [archive](https://pub.dev/packages/archive) package.
+## The three paths
 
-## What works
+### A. One click — public Wikisource and Wikibooks chapters
 
-- **Import chapters:** choose one or more UTF-8 TXT, HTML, HTM, or JSON files. Each file becomes one chapter. JSON may also contain an array of chapters or a `{"chapters":[...]}` object.
-- **Create EPUB 3:** Russian text, title and author, table of contents, accessible XHTML chapters, local EPUB file download.
-- **Privacy:** text you import is never uploaded. All processing stays in the tab.
-- **RanobeLIB URL mode:** attempts direct calls to RanobeLIB's public chapter API, with translation selection, chapter ranges, and sequential downloads; only usable **when the source allows CORS requests**.
+The MediaWiki API supports cross-origin requests when `origin=*` is provided. Paste your first and last chapter URLs (or select the built-in sample), then press **Collect & download EPUB**. Leaf infers changing numeric page IDs, reads chapters sequentially, cleans wiki navigation, and builds the EPUB.
 
-### Important limitation: RanobeLIB blocks direct browser downloads
+Try these public-domain example URLs:
 
-We verified the real upstream API from a GitHub Actions runner on October 27, 2026. Requests to `https://api.cdnlibs.org/api/manga/...` received HTTP **403** from DDoS-Guard with **no `Access-Control-Allow-Origin` header**, including OPTIONS preflight.
+- First: `https://en.wikisource.org/wiki/Pride_and_Prejudice_(1817)/Chapter_1`
+- Last: `https://en.wikisource.org/wiki/Pride_and_Prejudice_(1817)/Chapter_3`
 
-**Flutter cannot override the browser's CORS security rules.** The link-based mode is intentionally experimental and currently unlikely to work on GitHub Pages. There is **no proxy** and no promise of downloading the book directly from the URL. Use the file-import mode with chapters you have permission to save. Copying or saving material still requires appropriate rights/authorization.
+The direct reader supports Wikisource and Wikibooks language subdomains with `/wiki/...` page URLs. It intentionally limits a session to **120 pages** and spaces requests to avoid overwhelming public APIs. Reuse content only in accordance with each source's license and attribution requirements.
 
-The app currently creates **text-only EPUBs**: external image and cover downloads are not supported by the browser-only build.
+### B. Two-click collection — websites that block direct browser reads
 
-## Local development (optional)
+A normal GitHub Pages application **cannot read a cross-origin tab**. For other reading sites, Leaf uses a user-activated bookmarklet running inside the site's own browser tab.
 
-Requires Flutter SDK; you do **not** need Docker/Python.
+**One-time desktop Chrome/Edge setup:**
 
-```sh
-make setup
-make dev
+1. Open the Leaf website. Under **Other websites — setup once**, drag **Leaf Capture** into the bookmarks bar (or use **Copy bookmarklet URL** to create a bookmark manually).
+2. Paste the first and last chapter URLs into Leaf and press **Collect & download EPUB**.
+3. Leaf opens your first chapter in a normal tab. Log in or solve any CAPTCHA **yourself**, if the website requests it. Then click the **Leaf Capture** bookmark in that tab *once*.
+4. The helper uses same-origin page requests with your regular browser session, extracts readable text, and sends chapters to your open Leaf tab. On completion Leaf assembles the EPUB and starts the download.
+
+For simple numbered URLs, intermediate chapter URLs are computed without guessing any other number (IDs and `?bid=` query parameters are preserved). For unnumbered/opaque URLs, the helper looks for the page's **Next** link and stops exactly at the ending URL.
+
+The helper tries static HTML first; if a page requires client-side rendering, it tries a same-origin hidden frame. If it encounters a challenge, blocked response, missing chapter, duplicate content or a rate limit, it stops. You may need to navigate the site manually, re-activate the bookmarklet, or use **Import files** instead.
+
+**Compatibility is site-dependent and not guaranteed.** A website's Content Security Policy can prevent the bookmarklet or loading the helper; its Cross-Origin-Opener-Policy can sever its connection to Leaf. Browser restrictions are respected, not bypassed. This approach is intended for chapters you have the rights and website permission to save. In particular, **RanobeLIB remains unverified with an authenticated live reader**.
+
+The source-tab helper has a small panel with **Pause**, **Resume**, **Pick text area**, and **Export JSON** controls.
+
+### C. Import files — works entirely offline
+
+Choose TXT, HTML, HTM or chapter JSON files you already have permission to use, then click **Create EPUB**. No network, bookmarklet or source website is required.
+
+## Deep research: real source-compatibility audit
+
+Ran on GitHub Actions against **live public endpoints, October 27, 2026**, using the Origin header of Leaf's published website. This tests HTTP/CORS response headers; it is not a guarantee that every individual chapter is available.
+
+| Website | HTTP | CORS exposed to Flutter Web? | Leaf path |
+|---|---:|---|---|
+| English Wikisource API | 200 | Yes (`*`) | Direct API |
+| English Wikibooks API | 200 | Yes (`*`) | Direct API |
+| Russian Wikisource API | 200 | Yes (`*`) | Direct API |
+| Standard Ebooks public landing page | 200 | Yes (`*`) | Site-dependent (not a chapter API) |
+| Project Gutenberg public HTML | 200 | No CORS header | Bookmarklet or official EPUB |
+| RanobeLIB chapter API | 403 | No (DDoS-Guard) | Experimental bookmarklet; cannot promise |
+
+Details: [Public-source audit workflow](https://github.com/alex00Pirotskyi/leaf-ranobelib/actions/workflows/source-audit.yml). Wikimedia documents its public CORS API: https://www.mediawiki.org/wiki/API:Cross-site_requests .
+
+## Technical design
+
+```text
+Flutter Web — GitHub Pages
+  ├── ChapterUrlPlan: single numeric difference or Next-link fallback
+  ├── OpenReader: direct public Wikimedia CORS API
+  ├── Live bridge: authenticated opener + exact origin + session token
+  │      └── user-invoked leaf-capture.js on source site
+  │           ├── read visible chapter
+  │           ├── fetch sequential same-origin pages (bounded & paced)
+  │           ├── SPA render fallback, pause on blockers
+  │           └── postMessage chapters back to the Leaf tab
+  ├── LocalImporter: TXT / HTML / JSON
+  └── EpubBuilder: clean XHTML + OPF/nav/NCX + ZIP/mimetype → .epub
 ```
 
-To test and compile:
+All chapter transfer is directly **browser-to-browser using `postMessage`** with an explicit receiver origin and a per-session random token. The app verifies each page URL and chapter index before accepting it. Text is not transmitted to Leaf's GitHub repository, a Python backend or a third-party conversion service.
 
-```sh
+Static files:
+
+- `flutter_app/lib/main.dart` — Flutter UI, download and guarded session receiver
+- `flutter_app/lib/core/chapter_url_plan.dart` — bounded numeric URL inference
+- `flutter_app/lib/core/open_reader.dart` — Wikimedia API adapter
+- `flutter_app/web/leaf-capture.js` — optional user-invoked, in-page helper
+- `flutter_app/lib/core/epub_builder.dart` — EPUB packager and HTML sanitizer
+- `flutter_app/lib/core/local_importer.dart` — local-file fallback
+- `flutter_app/test/` — reproducible Dart tests
+- `scripts/browser-smoke.cjs` — real Chromium test of live Pages
+- `flutter_app/web/fixtures/` — original sample chapters for bridge testing
+
+## Tests and deployment
+
+The GitHub Pages workflow runs the EPUB and reading tests, validates the in-page JavaScript syntax, compiles Flutter Web and deploys the artifact under `/leaf-ranobelib/`. The separately runnable live Chromium smoke test attempts one-click Wikisource → EPUB and source-tab capture → EPUB, and inspects the resulting ZIPs. Test outcomes are published in GitHub Actions.
+
+Local development needs only Flutter, no Docker:
+
+```bash
+make setup
 make test
+make dev
 make build
 ```
 
-The repository has a GitHub Actions workflow at `.github/workflows/pages.yml` which runs Dart EPUB tests and builds the project site automatically when Flutter files change. Run `make deploy` to trigger deployment manually using the authenticated GitHub CLI. Your project is hosted at the **project path** `/leaf-ranobelib/`, not at the account-root website.
+## Constraints
 
-## Layout
+- External images and cover art are omitted in the current text-focused EPUB generator.
+- External reading sites can change their DOM, access rules, and rate limits. No tool can guarantee bulk chapter collection from every website.
+- Bookmarklet installation works best on desktop browsers. On iPhone Safari it may require manual bookmark editing and can be restricted.
+- The browser may block automatic downloads not initiated by a direct user gesture; the **Download EPUB again** button is available if that happens.
+- Respect copyright and website terms. A CAPTCHA may be solved by the user on the site, but this project neither automatically solves CAPTCHAs nor bypasses paywalls or restricted chapters.
 
-```text
-flutter_app/
-  lib/
-    main.dart                   Flutter interface and local browser download
-    core/
-      ranobe_client.dart        Direct RanobeLIB API client, when CORS permits
-      local_importer.dart       User-selected local TXT/HTML/JSON chapters
-      epub_builder.dart         Pure Dart EPUB 3 packaging
-  test/
-    epub_builder_test.dart      EPUB integrity, markup safety, URL validation
-.github/workflows/pages.yml    Build, test, and deploy Flutter Web
-Makefile                        Development and deployment commands
-```
-
-## EPUB details
-
-EPUB 3, `mimetype` stored as the first and uncompressed ZIP entry, required container XML, OPF manifest/spine, accessible EPUB navigation document, NCX compatibility document, and one XHTML file per chapter. Imported HTML is sanitized to safe reading markup (scripts, embeds, and remote resources are excluded).
-
-## FAQ
-
-**Why does the link return HTTP 403/CORS?** The restriction originates from RanobeLIB's website or its protective CDN, not from Flutter or GitHub Pages. Browser-only applications cannot read responses when the remote server disallows cross-origin access.
-
-**Why not a server?** This version deliberately does not use one. Local import works offline after the web app is loaded, including on iPhone Safari for supported file types.
-
-**Can it save illustrations?** Not currently. Text and navigation are supported; image embedding would require images chosen locally or permission to download remote image bytes.
-
-**Is it official?** No. This project is independent of RanobeLIB.
+Independent learning project, not affiliated with any reading provider.
