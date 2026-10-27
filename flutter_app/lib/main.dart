@@ -481,8 +481,8 @@ class _LeafHomeState extends State<LeafHome> {
             style:TextStyle(fontFamily:'Georgia',color:ink,
               fontSize:compact?39:54,height:1.14,letterSpacing:-1.6)),
           const SizedBox(height: 13),
-          const Text('Paste two chapter URLs. We find the pattern, collect '
-            'accessible pages, and make a real EPUB right in your browser.',
+          const Text('One-click EPUB for open reading APIs. Other websites '
+            'may require a Safari bookmark to collect chapters locally.',
             style:TextStyle(color:muted,fontSize:13,height:1.6)),
           const SizedBox(height: 24),
           Wrap(spacing:9,children:[
@@ -561,7 +561,9 @@ class _LeafHomeState extends State<LeafHome> {
       _field(_author,'Author (optional)'),
       const SizedBox(height:20),
       SizedBox(width:double.infinity,child:_button(
-        'Collect & download EPUB',Icons.download_rounded,_busy?null:_start)),
+        _mobileNeedsCapture ? 'Set up Safari capture' : 'Collect & download EPUB',
+        _mobileNeedsCapture ? Icons.phone_iphone_rounded : Icons.download_rounded,
+        _busy ? null : _start)),
       if(_busy)...[
         const SizedBox(height:9),
         Align(alignment:Alignment.centerRight,child:TextButton.icon(
@@ -569,9 +571,9 @@ class _LeafHomeState extends State<LeafHome> {
           label:const Text('Pause / cancel'))),
       ],
       const SizedBox(height:9),
-      const Text('Wikisource/Wikibooks: fully automated from Leaf. '
-        'Other websites: open the tab and activate Leaf Capture once. '
-        'CAPTCHAs and access restrictions are never bypassed.',
+      const Text('Wikisource/Wikibooks: one-click when chapter URLs follow '
+        'a simple pattern. Other sites need an in-page collector, and some '
+        'sites prohibit it. CAPTCHAs are handled by you.',
         style:TextStyle(color:muted,fontSize:11,height:1.5)),
     ],
   ));
@@ -597,7 +599,7 @@ class _LeafHomeState extends State<LeafHome> {
     ],
   ));
 
-  Widget _helperPanel()=>_surface(Column(
+  Widget _helperPanel()=>_isIPhoneSafari ? _mobileHelperPanel() : _surface(Column(
     crossAxisAlignment:CrossAxisAlignment.start,children:[
       _heading('02','Other websites — setup once'),
       const SizedBox(height:12),
@@ -631,6 +633,54 @@ class _LeafHomeState extends State<LeafHome> {
         const Text('Waiting for Leaf Capture in source tab…',
           style:TextStyle(color:pine,fontSize:12,fontWeight:FontWeight.w700)),
       ],
+    ],
+  ));
+
+  Widget _mobileHelperPanel()=>_surface(Column(
+    crossAxisAlignment:CrossAxisAlignment.start,children:[
+      _heading('02','iPhone Safari — capture chapters'),
+      const SizedBox(height:12),
+      const Text('Safari does not let Leaf read another website or '
+        'automatically operate its tabs. Instead, run a small bookmark '
+        'from the reading page itself. This is experimental and may be '
+        'blocked by the website.',style:TextStyle(color:muted,fontSize:12,height:1.6)),
+      const SizedBox(height:15),
+      const Text('1. Copy the personalized Safari helper',
+        style:TextStyle(color:ink,fontSize:13,fontWeight:FontWeight.w700)),
+      const SizedBox(height:5),
+      const Text('In Safari, save a bookmark using Share → Add Bookmark. '
+        'Open Bookmarks → Edit, rename it Leaf Capture, and paste the '
+        'copied code into its address / URL field.',
+        style:TextStyle(color:muted,fontSize:12,height:1.55)),
+      const SizedBox(height:13),
+      SizedBox(width:double.infinity,child:_button(
+        'Copy personalized Safari helper',
+        Icons.copy_rounded,()=>unawaited(_prepareSafariCapture()))),
+      const SizedBox(height:17),
+      const Text('2. Open the first chapter and run Leaf Capture',
+        style:TextStyle(color:ink,fontSize:13,fontWeight:FontWeight.w700)),
+      const SizedBox(height:5),
+      const Text('Handle any login or CAPTCHA yourself. Tap Leaf Capture '
+        'from Safari Bookmarks while on the chapter page. Leave Safari '
+        'open as the helper reads accessible pages.',
+        style:TextStyle(color:muted,fontSize:12,height:1.55)),
+      const SizedBox(height:12),
+      SizedBox(width:double.infinity,child:_button(
+        'Open first chapter in Safari',
+        Icons.open_in_new_rounded,_openMobileChapter)),
+      const SizedBox(height:17),
+      const Text('3. Import JSON to make EPUB',
+        style:TextStyle(color:ink,fontSize:13,fontWeight:FontWeight.w700)),
+      const SizedBox(height:5),
+      const Text('When finished, save the collected JSON file. '
+        'Return to Leaf → Import files → Choose files → Create EPUB. '
+        'If it pauses, use Export JSON for the chapters collected so far.',
+        style:TextStyle(color:muted,fontSize:12,height:1.55)),
+      const SizedBox(height:14),
+      const Text('Important: RanobeLIB may block bookmarklets or '
+        'automated page reads. This is not a guaranteed downloader '
+        'and cannot bypass a CAPTCHA or access restrictions.',
+        style:TextStyle(color:muted,fontSize:11,height:1.6)),
     ],
   ));
 
@@ -695,6 +745,11 @@ class _LeafHomeState extends State<LeafHome> {
   Widget _field(TextEditingController c,String hint)=>TextField(
     controller:c,enabled:!_busy,
     keyboardType:TextInputType.url,
+    onChanged:(v) {
+      if ((c==_first||c==_last) && _mobilePrepared) {
+        setState(() => _mobilePrepared = false);
+      }
+    },
     minLines:1,maxLines:c==_title||c==_author?1:3,
     style:const TextStyle(color:ink,fontSize:12),
     decoration:InputDecoration(hintText:hint));
