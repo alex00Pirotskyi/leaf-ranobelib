@@ -99,10 +99,10 @@ github-rename-pages: ## Rename repo to enable https://username.github.io/ (requi
 pages-enable: ## Enable GitHub Pages via GitHub CLI and trigger deployment
 	@gh auth status >/dev/null 2>&1 || { echo "Run: gh auth login"; exit 1; }
 	@REPO="$(GITHUB_OWNER)/$(PAGES_REPO)" && \
-		if gh api "repos/$REPO/pages" >/dev/null 2>&1; then \
-			gh api -X PUT "repos/$REPO/pages" -f build_type=workflow >/dev/null; \
+		if gh api "repos/$$REPO/pages" >/dev/null 2>&1; then \
+			gh api -X PUT "repos/$$REPO/pages" -f build_type=workflow >/dev/null; \
 		else \
-			gh api -X POST "repos/$REPO/pages" -f build_type=workflow >/dev/null; \
+			gh api -X POST "repos/$$REPO/pages" -f build_type=workflow >/dev/null; \
 		fi
 	@gh workflow run pages.yml --repo "$(GITHUB_OWNER)/$(PAGES_REPO)" --ref main
 	@echo "Pages enabled. Track: gh run list --repo $(GITHUB_OWNER)/$(PAGES_REPO) --workflow pages.yml --limit 1"
