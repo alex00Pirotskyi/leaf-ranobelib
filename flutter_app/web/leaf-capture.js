@@ -61,7 +61,38 @@
   button('Close', () => {
     stopped = true; host.remove(); window.__leafCaptureV2=null;
   });
-  panel.append(titleEl,msg,controls);
+
+  // Fallback for COOP-isolated tabs, mobile Safari and browsers that do not
+  // preserve window.opener. Users paste a plan explicitly copied from Leaf.
+  const pasteZone = document.createElement('div');
+  pasteZone.style.cssText = 'margin-top:12px;border-top:1px solid #b8c9b7;padding-top:10px';
+  const pasteLabel = document.createElement('div');
+  pasteLabel.textContent = 'No connection to Leaf? Paste a capture plan:';
+  pasteLabel.style.cssText = 'font-size:11px;margin-bottom:6px;color:#536455';
+  const planInput = document.createElement('textarea');
+  planInput.rows = 3;
+  planInput.placeholder = 'Paste the plan copied from Leaf…';
+  planInput.style.cssText = 'display:block;width:100%;box-sizing:border-box;font:11px/1.4 monospace;border:1px solid #a7b9a9;background:white;color:#28362e;border-radius:6px;padding:5px;';
+  const pasteButton = document.createElement('button');
+  pasteButton.textContent = 'Start using pasted plan';
+  pasteButton.style.cssText = 'margin-top:7px;padding:7px 10px;background:#e0ebde;color:#27392f;border:1px solid #8ba991;border-radius:6px;cursor:pointer;font:12px Arial,sans-serif';
+  pasteButton.addEventListener('click', () => {
+    try {
+      const data = JSON.parse(planInput.value);
+      if (data?.leaf !== 2 || data.type !== 'job' || data.manualMode !== true) {
+        throw Error('Not a Leaf capture plan.');
+      }
+      if (!Array.isArray(data.urls) || data.urls.length > MAX) {
+        throw Error('Invalid chapter range.');
+      }
+      acceptJob(data);
+    } catch (error) {
+      status('Could not use the pasted plan: ' + (error.message || error));
+    }
+  });
+  pasteZone.append(pasteLabel, planInput, pasteButton);
+
+  panel.append(titleEl,msg,controls,pasteZone);
   shadow.appendChild(panel);
   (document.body||document.documentElement).appendChild(host);
   const status = text => {msg.textContent=String(text); send({type:'status',note:String(text),index});};
@@ -241,7 +272,7 @@
         index++;
         if(normalize(url)===normalize(job.end)){
           send({type:'done',token:job.token,count:index});
-          if(offlineJob || !window.opener) {
+          if(offlineJob || job?.manualMode || !window.opener) {
             status('Done: '+index+' chapters. Saving JSON for Leaf Import files…');
             downloadJson();
           } else {
