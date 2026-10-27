@@ -82,6 +82,10 @@
     }
     if (!nodes.length) {
       const q = [
+        'main[data-reader-content] .text-content',
+        '[data-reader-content] .text-content',
+        'main[data-reader-content]', '[data-reader-content]',
+        '.text-content',
         '#chapter-content', '[data-testid="chapter-content"]',
         '.chapter-content', '.reader-content', '.reading-content',
         '.chapter__content', '.reader__content', '.chapter-body',
