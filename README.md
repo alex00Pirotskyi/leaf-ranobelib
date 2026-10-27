@@ -36,6 +36,20 @@ The helper tries static HTML first; if a page requires client-side rendering, it
 
 The source-tab helper has a small panel with **Pause**, **Resume**, **Pick text area**, and **Export JSON** controls.
 
+### iPhone Safari: personalized mobile capture (experimental)
+
+The previous version incorrectly displayed **0/N chapters — Waiting for Leaf Capture** on iPhone, even though the desktop drag-to-bookmarks workflow cannot be used there. This has been corrected.
+
+For non-Wikimedia websites, Leaf now recognizes iPhone Safari and presents **Set up Safari capture**, rather than pretending collection has started:
+
+1. Select the first and last chapter URLs. Tap **Set up Safari capture** or **Copy personalized Safari helper** in Leaf. Leaf preloads the helper and copies a self-contained bookmarklet that includes your specific chapter range.
+2. In Safari, use **Share → Add Bookmark** on any page. Open the bookmarks list, tap **Edit**, select that bookmark, name it **Leaf Capture**, and replace its URL with the copied `javascript:` text.
+3. Return to Leaf, tap **Open first chapter in Safari**, then open the **Leaf Capture** bookmark from Safari's bookmarks list on the reading page. Handle any CAPTCHA manually.
+4. The source-tab helper attempts to collect allowed pages sequentially. When complete, tap **Export JSON** if the file is not automatically saved in Safari Downloads.
+5. Return to Leaf → **Import files** → choose the JSON → **Create EPUB**.
+
+This flow does **not** claim to work on every site or on all versions of iOS Safari. Some sites block bookmarklets or automated same-origin requests; very long bookmark URLs may also be unsupported. You can always import TXT/HTML/JSON chapters manually. Open-reading sites like Wikisource still use the genuinely one-click API route.
+
 ### C. Import files — works entirely offline
 
 Choose TXT, HTML, HTM or chapter JSON files you already have permission to use, then click **Create EPUB**. No network, bookmarklet or source website is required.
