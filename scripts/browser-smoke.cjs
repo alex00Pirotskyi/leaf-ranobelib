@@ -89,6 +89,57 @@ async function verifyDownload(download, filename) {
    const secondDownload=await downloadPromise;
    await verifyDownload(secondDownload,'bookmarklet_fixture.epub');
    console.log('SCENARIO 2 PASS');
+
+   console.log('SCENARIO 3: standalone bookmarklet without an opener, export JSON');
+   const isolated=await context.newPage();
+   await isolated.goto(SITE+'fixtures/chapter-1.html',{waitUntil:'domcontentloaded'});
+   const plan={
+     leaf:2,type:'job',token:'smoke-manual-session',
+     start:SITE+'fixtures/chapter-1.html',
+     end:SITE+'fixtures/chapter-3.html',
+     urls:[1,2,3].map(i=>SITE+'fixtures/chapter-'+i+'.html'),
+     max:3,title:'Offline Archive Example',resumeFrom:0,manualMode:true,
+   };
+   const jsonPromise=isolated.waitForEvent('download',{timeout:45000});
+   await isolated.evaluate(() => {
+     const s=document.createElement('script');
+     s.src='https://alex00pirotskyi.github.io/leaf-ranobelib/leaf-capture.js';
+     document.head.appendChild(s);
+   });
+   await isolated.waitForFunction(
+     () => !!document.querySelector('#leaf-capture-v2')?.shadowRoot?.querySelector('textarea'),
+     {timeout:15000}
+   );
+   await isolated.evaluate(plan => {
+     const root=document.querySelector('#leaf-capture-v2').shadowRoot;
+     const textarea=root.querySelector('textarea');
+     textarea.value=JSON.stringify(plan);
+     [...root.querySelectorAll('button')].find(b=>b.textContent.includes('Start using pasted plan')).click();
+   },plan);
+   const jsonDownload=await jsonPromise;
+   const jsonFile=path.join(out,'standalone_book.json');
+   await jsonDownload.saveAs(jsonFile);
+   const book=JSON.parse(fs.readFileSync(jsonFile,'utf8'));
+   assert(book.chapters?.length===3,'Standalone collector did not save 3 chapters');
+   assert(book.chapters[2].html.includes('Chapter 3 begins'),
+     'Standalone collector saved wrong final chapter');
+   console.log('SCENARIO 3 PASS JSON with',book.chapters.length,'chapters');
+
+   console.log('SCENARIO 4: import standalone JSON into Leaf, build EPUB locally');
+   await page.reload({waitUntil:'domcontentloaded'});
+   await enableAccessibility(page);
+   await page.getByRole('button',{name:/Import files/i}).click();
+   const [chooser]=await Promise.all([
+     page.waitForEvent('filechooser',{timeout:20000}),
+     page.getByRole('button',{name:/Choose files/i}).click(),
+   ]);
+   await chooser.setFiles(jsonFile);
+   const [thirdDownload]=await Promise.all([
+     page.waitForEvent('download',{timeout:45000}),
+     page.getByRole('button',{name:/Create EPUB/i}).click(),
+   ]);
+   await verifyDownload(thirdDownload,'standalone_import.epub');
+   console.log('SCENARIO 4 PASS');
  }catch(err){
    console.error('SMOKE FAILURE:',err.stack||err);
    try{await page.screenshot({path:path.join(out,'failure.png'),fullPage:true});}catch(_){}
