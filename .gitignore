@@ -8,4 +8,5 @@ flutter_app/build/
 flutter_app/.flutter-plugins*
 flutter_app/.metadata
 flutter_app/.packages
-flutter_app/pubspec.lock
+smoke-artifacts/
+node_modules/

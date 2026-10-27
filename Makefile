@@ -16,7 +16,7 @@ help: ## Show available targets (no Docker required)
 	@echo 'Website: $(PAGES_URL)'
 	@echo 'make setup       Prepare Flutter Web project'
 	@echo 'make dev         Run browser development build'
-	@echo 'make test        Test EPUB creation'
+	@echo 'make test        Test catalogue, chapters, imports and EPUBs'
 	@echo 'make check       Analyze source code'
 	@echo 'make build       Build static GitHub Pages bundle'
 	@echo 'make deploy      Trigger GitHub Pages workflow via GitHub CLI'
@@ -31,7 +31,7 @@ dev: ## Start Flutter Web in Chrome
 web: dev
 
 test: ## Run Dart EPUB tests
-	cd flutter_app && $(FLUTTER) test test/epub_builder_test.dart
+	cd flutter_app && $(FLUTTER) test
 
 check: ## Static analysis
 	cd flutter_app && $(FLUTTER) analyze lib

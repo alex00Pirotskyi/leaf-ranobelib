@@ -1,49 +1,70 @@
-name: Real browser end-to-end smoke
+name: Desktop and mobile reading checks
 on:
   workflow_dispatch:
   push:
+    branches: [main]
     paths:
-      - .github/workflows/browser-smoke.yml
-      - scripts/browser-smoke.cjs
+      - 'flutter_app/**'
+      - 'scripts/**'
+      - '.github/workflows/browser-smoke.yml'
+  pull_request:
+    paths:
+      - 'flutter_app/**'
+      - 'scripts/**'
+      - '.github/workflows/browser-smoke.yml'
 permissions:
   contents: read
+concurrency:
+  group: leaf-checks-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
-  live:
+  reading:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.47.8'
+          channel: stable
+          cache: true
+      - name: Install Dart dependencies
+        working-directory: flutter_app
+        run: flutter pub get
+      - name: Test reading logic and EPUB integrity
+        working-directory: flutter_app
+        run: flutter test
+      - name: Test actual copied bookmarklets and collector recovery
+        run: node scripts/capture-regression.cjs
+      - name: Build the exact source under review
+        working-directory: flutter_app
+        run: flutter build web --release --base-href=/leaf-ranobelib/
       - uses: actions/setup-node@v4
         with:
-          node-version: "22"
-      - name: Install Chromium browser automation for testing only
+          node-version: '22'
+      - name: Install Chromium and WebKit for project tests
         run: |
           npm install --no-save playwright
-          npx playwright install chromium
-      - name: Test actual live GitHub Pages site
-        run: node scripts/browser-smoke.cjs
-      - name: Check EPUB contents from live browser downloads
-        if: success()
+          npx playwright install --with-deps chromium webkit
+      - name: Serve the built app for tests
         run: |
-          python3 - <<'PY'
-          from pathlib import Path
-          from zipfile import ZipFile
-          folder=Path("smoke-artifacts")
-          for name in ("wikimedia_demo.epub", "bookmarklet_fixture.epub", "standalone_import.epub"):
-              file=folder/name
-              with ZipFile(file) as z:
-                  names=z.namelist()
-                  assert names[0]=="mimetype", names[:4]
-                  assert z.read("mimetype")==b"application/epub+zip"
-                  assert "OEBPS/nav.xhtml" in names
-                  chapters=[p for p in names if p.startswith("OEBPS/c") and p.endswith(".xhtml")]
-                  assert len(chapters)==3,(name,chapters)
-                  print(name, "PASS",len(chapters),"chapters",file.stat().st_size,"bytes")
-          PY
-      - name: Upload smoke logs and downloaded EPUBs
+          mkdir -p /tmp/leaf-web-root
+          ln -s "$GITHUB_WORKSPACE/flutter_app/build/web" /tmp/leaf-web-root/leaf-ranobelib
+          python3 -m http.server 8765 --bind 127.0.0.1 --directory /tmp/leaf-web-root > /tmp/leaf-test-server.log 2>&1 &
+          for attempt in $(seq 1 20); do
+            if curl --fail --silent http://127.0.0.1:8765/leaf-ranobelib/ > /dev/null; then break; fi
+            sleep 1
+          done
+      - name: Exercise desktop, Android viewport and WebKit phone flows
+        env:
+          LEAF_SITE: http://127.0.0.1:8765/leaf-ranobelib/
+        run: node scripts/browser-smoke.cjs
+      - name: Inspect every browser-downloaded EPUB
+        run: python3 scripts/verify_epubs.py smoke-artifacts
+      - name: Keep browser evidence and downloaded EPUBs
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: leaf-smoke-artifacts
+          name: leaf-desktop-mobile-checks
           path: smoke-artifacts/
           if-no-files-found: ignore

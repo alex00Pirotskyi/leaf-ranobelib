@@ -30,6 +30,7 @@ jobs:
       - name: Install Flutter
         uses: subosito/flutter-action@v2
         with:
+          flutter-version: '3.47.8'
           channel: stable
           cache: true
 
@@ -39,12 +40,14 @@ jobs:
           flutter create --platforms=web --project-name=leaf_reader .
           flutter pub get
 
-      - name: Run Dart EPUB generator tests
+      - name: Test catalogue, discovery, imports and EPUB integrity
         working-directory: flutter_app
-        run: flutter test test/epub_builder_test.dart test/reading_workflow_test.dart
+        run: flutter test
 
       - name: Validate bookmarklet JavaScript
-        run: node --check flutter_app/web/leaf-capture.js
+        run: |
+          node --check flutter_app/web/leaf-capture.js
+          node scripts/capture-regression.cjs
 
       - name: Build Flutter Web
         working-directory: flutter_app

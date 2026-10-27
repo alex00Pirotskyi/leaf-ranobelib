@@ -1,101 +1,116 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:html' as browser;
+import 'dart:typed_data';
 
 import 'epub_builder.dart';
-import 'ranobe_client.dart';
+import 'import_parser.dart';
+
+export 'import_parser.dart' show ImportedBook;
 
 /// Reads only files explicitly chosen by the user. No uploads or server storage.
 class LocalImporter {
-  static Future<List<BookChapter>> chooseChapters() async {
+  static Future<List<BookChapter>> chooseChapters() async =>
+      (await chooseBook()).chapters;
+
+  /// Cancellation returns an empty book; partial capture metadata is preserved.
+  static Future<ImportedBook> chooseBook() async {
+    final files = await _chooseFiles();
+    if (files.isEmpty) return ImportedBook(chapters: const []);
+    if (files.length > ImportParser.maxChapters) {
+      throw const FormatException(
+          'Choose no more than 500 chapter files at once.');
+    }
+    var total = 0;
+    for (final file in files) {
+      if (file.size > ImportParser.maxFileBytes) {
+        throw FormatException(
+            '${file.name} is larger than the 16 MB file limit.');
+      }
+      total += file.size;
+      if (total > ImportParser.maxTotalBytes) {
+        throw const FormatException(
+            'Choose at most 64 MB of files per import.');
+      }
+    }
+    final sources = <ImportFile>[];
+    for (final file in files) {
+      final reader = browser.FileReader();
+      final completed = reader.onLoadEnd.first;
+      reader.readAsArrayBuffer(file);
+      try {
+        await completed.timeout(const Duration(seconds: 30));
+      } on TimeoutException {
+        reader.abort();
+        throw FormatException('Reading ${file.name} took too long. Try again.');
+      }
+      if (reader.error != null)
+        throw FormatException('Cannot read ${file.name}.');
+      final data = reader.result;
+      final bytes = data is ByteBuffer
+          ? data.asUint8List()
+          : data is Uint8List
+              ? data
+              : null;
+      if (bytes == null) throw FormatException('Cannot read ${file.name}.');
+      try {
+        sources.add(ImportFile(file.name, utf8.decode(bytes)));
+      } on FormatException {
+        throw FormatException(
+            '${file.name} is not UTF-8 text. Save it as UTF-8 and retry.');
+      }
+    }
+    return ImportParser.parseFiles(sources);
+  }
+
+  static Future<List<browser.File>> _chooseFiles() async {
     final input = browser.FileUploadInputElement()
       ..accept = '.txt,.html,.htm,.json'
-      ..multiple = true;
-    input.click();
-    await input.onChange.first;
-    final files = input.files;
-    if (files == null || files.isEmpty) return [];
-    final ordered = files.toList()
-      ..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
-    final chapters = <BookChapter>[];
-    for (final file in ordered) {
-      final reader = browser.FileReader();
-      reader.readAsText(file, 'UTF-8');
-      await reader.onLoadEnd.first;
-      if (reader.error != null) {
-        throw FormatException('Cannot read ' + file.name);
-      }
-      final data = reader.result;
-      if (data is! String) {
-        throw FormatException('Cannot decode ' + file.name + ' as UTF-8');
-      }
-      final filename = file.name;
-      final ext = filename.split('.').last.toLowerCase();
-      final label = filename.replaceFirst(RegExp(r'\.[^.]+$'), '');
-      if (ext == 'json') {
-        chapters.addAll(_fromJson(data, label));
-      } else if (ext == 'html' || ext == 'htm') {
-        chapters.add(BookChapter(label, data));
-      } else if (ext == 'txt') {
-        chapters.add(BookChapter(label, textToHtml(data)));
-      }
+      ..multiple = true
+      ..style.position = 'fixed'
+      ..style.left = '-10000px';
+    browser.document.body?.append(input);
+    final result = Completer<List<browser.File>>();
+    final subscriptions = <StreamSubscription>[];
+    Timer? focusTimer;
+    var leftWindow = false;
+    void finish() {
+      if (!result.isCompleted)
+        result.complete(List.of(input.files ?? const <browser.File>[]));
     }
-    return chapters;
-  }
 
-  static List<BookChapter> _fromJson(String source, String fallback) {
-    dynamic data;
+    void returnedToPage() {
+      if (!leftWindow || result.isCompleted) return;
+      focusTimer?.cancel();
+      // Allow change to arrive before treating restored focus as cancellation.
+      focusTimer = Timer(const Duration(milliseconds: 700), finish);
+    }
+
+    subscriptions.add(input.onChange.listen((_) => finish()));
+    subscriptions.add(input.on['cancel'].listen((_) => finish()));
+    subscriptions.add(browser.window.onBlur.listen((_) => leftWindow = true));
+    subscriptions.add(browser.window.onFocus.listen((_) => returnedToPage()));
+    subscriptions.add(browser.document.onVisibilityChange.listen((_) {
+      if (browser.document.hidden == true) {
+        leftWindow = true;
+      } else {
+        returnedToPage();
+      }
+    }));
+    // Bounded fallback for old browsers with neither cancel nor focus events.
+    final limit = Timer(const Duration(minutes: 5), finish);
     try {
-      data = jsonDecode(source);
-    } catch (_) {
-      throw FormatException('Invalid JSON: ' + fallback);
-    }
-    if (data is Map && data.containsKey('data')) data = data['data'];
-    if (data is Map && data['chapters'] is List) {
-      final result = <BookChapter>[];
-      for (final chapter in data['chapters'] as List) {
-        if (chapter is! Map) continue;
-        final title = (chapter['title'] ?? chapter['name'] ??
-            'Chapter ' + (result.length + 1).toString()).toString();
-        result.add(BookChapter(title, _chapterHtml(chapter)));
+      input.click();
+      return await result.future;
+    } finally {
+      limit.cancel();
+      focusTimer?.cancel();
+      for (final subscription in subscriptions) {
+        await subscription.cancel();
       }
-      return result;
+      input.remove();
     }
-    if (data is List) {
-      final result = <BookChapter>[];
-      for (final chapter in data) {
-        if (chapter is Map) {
-          final title = (chapter['title'] ?? chapter['name'] ??
-              'Chapter ' + (result.length + 1).toString()).toString();
-          result.add(BookChapter(title, _chapterHtml(chapter)));
-        }
-      }
-      if (result.isNotEmpty) return result;
-    }
-    if (data is Map) {
-      return [BookChapter(
-          (data['title'] ?? data['name'] ?? fallback).toString(), _chapterHtml(data))];
-    }
-    throw FormatException('Expected a chapter, array, or {"chapters": [...]} in ' + fallback);
   }
 
-  static String _chapterHtml(Map chapter) {
-    final content = chapter['html'] ?? chapter['content'] ?? chapter['text'];
-    if (content is String) {
-      if (RegExp(r'<[a-zA-Z][^>]*>').hasMatch(content)) return content;
-      return textToHtml(content);
-    }
-    if (content is Map && content['type'] == 'doc' && content['content'] is List) {
-      return documentNodesToHtml(content['content'] as List);
-    }
-    return '<p>No chapter text found.</p>';
-  }
-
-  static String textToHtml(String text) {
-    final cleaned = text.replaceAll('\r\n', '\n').trim();
-    if (cleaned.isEmpty) return '<p> </p>';
-    final paragraphs = cleaned.split(RegExp(r'\n\s*\n+'));
-    return paragraphs.map((p) => '<p>' +
-        escapeXml(p.trim()).replaceAll('\n', '<br/>') + '</p>').join('\n');
-  }
+  static String textToHtml(String text) => ImportParser.textToHtml(text);
 }

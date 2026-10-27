@@ -1,143 +1,81 @@
-# leaf. — Chapter URLs → EPUB, right in Flutter Web
+# leaf. — Find a book. Take it with you.
 
-**Live:** https://alex00pirotskyi.github.io/leaf-ranobelib/
+**App:** https://alex00pirotskyi.github.io/leaf-ranobelib/
 
-A minimal Flutter Web application that turns a range of accessible reading pages into an EPUB. No Python, Render, Docker, or central conversion backend. EPUB generation, chapter ordering, content cleaning, ZIP creation, and local download all run in Dart in your browser.
+Leaf is a Flutter web app for finding Russian and English reading material and preparing EPUBs on the reader's device. It runs on GitHub Pages without a conversion server or browser extension.
 
-## The three paths
+## The main experience
 
-### A. One click — public Wikisource and Wikibooks chapters
+1. Open **Find a book**, choose **Русский**, **English**, or **All books**.
+2. Search by title/author, paste a supported edition URL, or tap a featured book.
+3. Leaf discovers the source's contents, downloads the selected reading sections, and builds an EPUB locally.
+4. Desktop browsers receive a download and a **Download EPUB again** button. On a phone, tap **Save EPUB** when ready. **Share / open in a reader** appears only when the browser can share the actual EPUB file.
 
-The MediaWiki API supports cross-origin requests when `origin=*` is provided. Paste your first and last chapter URLs (or select the built-in sample), then press **Collect & download EPUB**. Leaf infers changing numeric page IDs, reads chapters sequentially, cleans wiki navigation, and builds the EPUB.
+Featured books include **Капитанская дочка**, **Евгений Онегин**, **Alice's Adventures in Wonderland**, and a source-provided **Pride and Prejudice** EPUB. The Gutenberg card opens the provider's existing file; it does not scrape chapters or pretend Leaf has inspected an external download.
 
-Try these public-domain example URLs:
+## What is integrated
 
-- First: `https://en.wikisource.org/wiki/Pride_and_Prejudice_(1817)/Chapter_1`
-- Last: `https://en.wikisource.org/wiki/Pride_and_Prejudice_(1817)/Chapter_3`
+| Source | Search in Leaf | Acquisition |
+|---|---|---|
+| Russian Wikisource / Викитека | Yes; title-prefix fallback if full-text search is busy | Discover edition contents and build EPUB locally |
+| English Wikisource | Yes | Discover edition contents and build EPUB locally |
+| Wikibooks | Paste a supported book/chapter URL | Same public API reading adapter |
+| Project Gutenberg | Featured direct EPUB plus library link | Source-native EPUB download |
+| Standard Ebooks, Open Library | Library directory | Open the provider to find editions and available downloads |
+| RanobeLIB, Author.Today, Royal Road | Library directory | Source website; permitted local file import; optional experimental capture where compatible |
 
-The direct reader supports Wikisource and Wikibooks language subdomains with `/wiki/...` page URLs. It intentionally limits a session to **120 pages** and spaces requests to avoid overwhelming public APIs. Reuse content only in accordance with each source's license and attribution requirements.
+The **Explore book libraries** directory labels external discovery separately from integrated reading. A catalogue listing does not mean that every title can be downloaded automatically.
 
-### B. Two-click collection — websites that block direct browser reads
+## Automatic chapter discovery
 
-A normal GitHub Pages application **cannot read a cross-origin tab**. For other reading sites, Leaf uses a user-activated bookmarklet running inside the site's own browser tab.
+Leaf follows the reading order in a source's actual contents, including named/Roman chapters and nested volumes. It does not assume that incrementing a number means the whole book has been found. A title page that lists different editions is rejected rather than merging incompatible versions.
 
-**One-time desktop Chrome/Edge setup:**
+Verified real source responses produced:
 
-1. Open the Leaf website. Under **Other websites — setup once**, drag **Leaf Capture** into the bookmarks bar (or use **Copy bookmarklet URL** to create a bookmark manually).
-2. Paste the first and last chapter URLs into Leaf and press **Collect & download EPUB**.
-3. Leaf opens your first chapter in a normal tab. Log in or solve any CAPTCHA **yourself**, if the website requests it. Then click the **Leaf Capture** bookmark in that tab *once*.
-4. The helper uses same-origin page requests with your regular browser session, extracts readable text, and sends chapters to your open Leaf tab. On completion Leaf assembles the EPUB and starts the download.
+- **Капитанская дочка**, 1960 edition: 16 sections — 14 chapters, appendix, and substantive text/notes on the contents page.
+- **Евгений Онегин**, 1959 edition: one full-text source page.
+- **Alice**, 1866 edition: 13 sections — opening poem plus 12 chapters.
+- **Pride and Prejudice**, 1817 edition: 61 chapters.
 
-For simple numbered URLs, intermediate chapter URLs are computed without guessing any other number (IDs and `?bid=` query parameters are preserved). For unnumbered/opaque URLs, the helper looks for the page's **Next** link and stops exactly at the ending URL.
+The automatic adapter stops explicitly at more than 500 sections, 64 contents pages, or eight nested levels. Missing pages, circular contents, unsupported edition indexes, and known incomplete editions are errors, not silently shortened books. A conservative single-page result explains its scope.
 
-The helper tries static HTML first; if a page requires client-side rendering, it tries a same-origin hidden frame. If it encounters a challenge, blocked response, missing chapter, duplicate content or a rate limit, it stops. You may need to navigate the site manually, re-activate the bookmarklet, or use **Import files** instead.
+## Recovery and phones
 
-**Compatibility is site-dependent and not guaranteed.** A website's Content Security Policy can prevent the bookmarklet or loading the helper; its Cross-Origin-Opener-Policy can sever its connection to Leaf. Browser restrictions are respected, not bypassed. This approach is intended for chapters you have the rights and website permission to save. In particular, **RanobeLIB remains unverified with an authenticated live reader**.
+Each completed direct-API section is saved in IndexedDB. **Pause download**, a full reload, and **Continue saved book** preserve downloaded content and resume at the next missing section. Metadata and chapter bodies are read/written atomically, and new chapter bodies are appended rather than rewriting an entire long book after every request. Storage errors are visible.
 
-The source-tab helper has a small panel with **Pause**, **Resume**, **Pick text area**, and **Export JSON** controls.
+Keep the browser open for long downloads: phones can suspend background tabs. Saving progress makes interruptions recoverable; it does not create background execution privileges. Private browsing, quota limits, clearing site data, or browser eviction can remove local progress.
 
-### iPhone Safari: personalized mobile capture (experimental)
+Captured chapters from an external source tab can be **recovered** after reloading Leaf, but the old popup/session connection cannot be reconstructed. Those chapters can be exported as a clearly marked partial EPUB.
 
-The previous version incorrectly displayed **0/N chapters — Waiting for Leaf Capture** on iPhone, even though the desktop drag-to-bookmarks workflow cannot be used there. This has been corrected.
+Mobile saving needs a deliberate tap after a long job. EPUB file sharing is feature-detected with the actual file; it is never assumed from the presence of `navigator.share` alone.
 
-For non-Wikimedia websites, Leaf now recognizes iPhone Safari and presents **Set up Safari capture**, rather than pretending collection has started:
+## Manual chapter links and imports
 
-1. Select the first and last chapter URLs. Tap **Set up Safari capture** or **Copy personalized Safari helper** in Leaf. Leaf preloads the helper and copies a self-contained bookmarklet that includes your specific chapter range.
-2. In Safari, use **Share → Add Bookmark** on any page. Open the bookmarks list, tap **Edit**, select that bookmark, name it **Leaf Capture**, and replace its URL with the copied `javascript:` text.
-3. Return to Leaf, tap **Open first chapter in Safari**, then open the **Leaf Capture** bookmark from Safari's bookmarks list on the reading page. Handle any CAPTCHA manually.
-4. The source-tab helper attempts to collect allowed pages sequentially. When complete, tap **Export JSON** if the file is not automatically saved in Safari Downloads.
-5. Return to Leaf → **Import files** → choose the JSON → **Create EPUB**.
+**Chapter links** accepts a first and last HTTPS chapter URL. A single recognizable changing chapter/page number may generate a bounded range; opaque URLs use explicit Next links through the optional source-tab collector. Book IDs, percent-encoded Cyrillic, query IDs, and browser hash routes are not guessed as chapter numbers.
 
-This flow does **not** claim to work on every site or on all versions of iOS Safari. Some sites block bookmarklets or automated same-origin requests; very long bookmark URLs may also be unsupported. You can always import TXT/HTML/JSON chapters manually. Open-reading sites like Wikisource still use the genuinely one-click API route.
+**Import files** accepts TXT, HTML/HTM, and chapter JSON. Files are ordered naturally (`1, 2, 10`), decoded as strict UTF-8, and validated before conversion. Invalid or missing chapter text rejects the batch. JSON metadata, language, expected chapter count, and `complete:false` survive import. Re-selecting files replaces the selection rather than silently duplicating it.
 
-### C. Import files — works entirely offline
+Limits: 16 MB per file, 64 MB per import, 500 imported chapters. Limits produce errors instead of truncation.
 
-Choose TXT, HTML, HTM or chapter JSON files you already have permission to use, then click **Create EPUB**. No network, bookmarklet or source website is required.
+## CAPTCHA and other websites
 
-## Deep research: real source-compatibility audit
+A normal web app cannot read another origin's tab or iframe. Opening a website and solving its CAPTCHA does not remove browser CORS/same-origin restrictions.
 
-Ran on GitHub Actions against **live public endpoints, October 27, 2026**, using the Origin header of Leaf's published website. This tests HTTP/CORS response headers; it is not a guarantee that every individual chapter is available.
+The existing **Leaf Capture** bookmarklet is an optional, user-activated collector that runs on the source page. It may work on compatible accessible sites, but a source can block it through its access controls, CSP, COOP, or page structure. It stops on challenges, rate limits, duplicate bodies, loops, ambiguous Next links, or oversized chapters. It neither solves CAPTCHAs nor bypasses access restrictions.
 
-| Website | HTTP | CORS exposed to Flutter Web? | Leaf path |
-|---|---:|---|---|
-| English Wikisource API | 200 | Yes (`*`) | Direct API |
-| English Wikibooks API | 200 | Yes (`*`) | Direct API |
-| Russian Wikisource API | 200 | Yes (`*`) | Direct API |
-| Standard Ebooks public landing page | 200 | Yes (`*`) | Site-dependent (not a chapter API) |
-| Project Gutenberg public HTML | 200 | No CORS header | Bookmarklet or official EPUB |
-| RanobeLIB chapter API | 403 | No (DDoS-Guard) | Experimental bookmarklet; cannot promise |
+Desktop capture and the personalized iPhone Safari bookmark remain experimental. On Android, unsupported external sources lead to an explicit import path, not desktop drag-to-bookmark instructions or a fictitious collection spinner. Integrated library downloads work directly on phone and desktop.
 
-Details: [Public-source audit workflow](https://github.com/alex00Pirotskyi/leaf-ranobelib/actions/workflows/source-audit.yml). Wikimedia documents its public CORS API: https://www.mediawiki.org/wiki/API:Cross-site_requests .
+**RanobeLIB authenticated full-book capture remains unverified.** Do not advertise universal one-click downloads from arbitrary sites.
 
-## Technical design
+## EPUB quality
 
-```text
-Flutter Web — GitHub Pages
-  ├── ChapterUrlPlan: single numeric difference or Next-link fallback
-  ├── OpenReader: direct public Wikimedia CORS API
-  ├── Live bridge: authenticated opener + exact origin + session token
-  │      └── user-invoked leaf-capture.js on source site
-  │           ├── read visible chapter
-  │           ├── fetch sequential same-origin pages (bounded & paced)
-  │           ├── SPA render fallback, pause on blockers
-  │           └── postMessage chapters back to the Leaf tab
-  ├── LocalImporter: TXT / HTML / JSON
-  └── EpubBuilder: clean XHTML + OPF/nav/NCX + ZIP/mimetype → .epub
-```
+The Dart builder creates EPUB 3 with the correct source language, a unique identifier, actual UTC modification time, and consistent navigation/spine metadata. Sanitized XHTML preserves paragraphs, emphasis, lists, quotations, tables, superscripts and preformatted text. External images are represented by placeholders; cover art and original page styling are not bundled.
 
-All chapter transfer is directly **browser-to-browser using `postMessage`** with an explicit receiver origin and a per-session random token. The app verifies each page URL and chapter index before accepting it. Text is not transmitted to Leaf's GitHub repository, a Python backend or a third-party conversion service.
+EN and RU production-generated fixtures passed official **W3C EPUBCheck 5.4.0** with zero errors and zero warnings. See [the research and validation notes](docs/reading-experience-research.md) for scope and evidence.
 
-Static files:
+## Development and checks
 
-- `flutter_app/lib/main.dart` — Flutter UI, download and guarded session receiver
-- `flutter_app/lib/core/chapter_url_plan.dart` — bounded numeric URL inference
-- `flutter_app/lib/core/open_reader.dart` — Wikimedia API adapter
-- `flutter_app/web/leaf-capture.js` — optional user-invoked, in-page helper
-- `flutter_app/lib/core/epub_builder.dart` — EPUB packager and HTML sanitizer
-- `flutter_app/lib/core/local_importer.dart` — local-file fallback
-- `flutter_app/test/` — reproducible Dart tests
-- `scripts/browser-smoke.cjs` — real Chromium test of live Pages
-- `flutter_app/web/fixtures/` — original sample chapters for bridge testing
-
-## Verified real-browser results (October 27, 2026)
-
-The live site was tested with headless Chromium, not only static compilation. The
-[successful end-to-end run](https://github.com/alex00Pirotskyi/leaf-ranobelib/actions/runs/40574185038)
-completed **five scenarios**, with three downloadable EPUBs validated as ZIP/EPUB
-archives containing exactly three chapters each:
-
-| Scenario | Verified outcome |
-|---|---|
-| One-click English Wikisource sample | 3 real chapters read and EPUB downloaded, 12,403 bytes |
-| Live browser chapter tab + user-invoked helper | 3 original test chapters captured and EPUB downloaded, 4,534 bytes |
-| No tab connection / isolated browser | 3 original test chapters collected into a valid JSON download |
-| Import that JSON into Leaf | 3-chapter EPUB downloaded, 4,535 bytes |
-| Emulated iPhone Safari UI | Actionable capture setup displayed instead of a stuck 0/N progress bar |
-
-Separate live API probes confirmed actual HTML content and permissive CORS for
-English Wikisource (18,658 bytes), English Wikibooks (40,244 bytes) and Russian
-Wikisource (306,500 bytes). These findings validate the **same Wikimedia adapter**
-across English/Russian providers, not universal access to arbitrary reading sites.
-
-**Not yet verified:** complete chapter capture on RanobeLIB with a real logged-in
-session. Its separate API returned HTTP 403 from DDoS-Guard. Browser security,
-site terms, CAPTCHA pages, JavaScript-rendered content, and CSP/COOP policies may
-prevent the bookmarklet from collecting its pages. No claim of reliable
-one-click RanobeLIB export is made.
-
-### Fallback when the browser severs the tab connection
-
-On desktop, in Leaf choose **Copy capture plan (no tab connection needed)**.
-In the opened source tab run the Leaf Capture bookmarklet, paste that plan into
-its panel, and press **Start using pasted plan**. When complete, it downloads
-JSON. Return to Leaf, select **Import files**, and create EPUB. This fallback
-was successfully exercised in Chromium on the sample chapter site.
-
-## Tests and deployment
-
-The GitHub Pages workflow runs the EPUB and reading tests, validates the in-page JavaScript syntax, compiles Flutter Web and deploys the artifact under `/leaf-ranobelib/`. The separately runnable live Chromium smoke test attempts one-click Wikisource → EPUB and source-tab capture → EPUB, and inspects the resulting ZIPs. Test outcomes are published in GitHub Actions.
-
-Local development needs only Flutter, no Docker:
+Flutter is pinned to **3.47.8** in CI; application dependencies are locked.
 
 ```bash
 make setup
@@ -146,12 +84,12 @@ make dev
 make build
 ```
 
-## Constraints
+Additional collector regressions compile the actual copied desktop/Safari bookmarklets, not merely the raw helper source:
 
-- External images and cover art are omitted in the current text-focused EPUB generator.
-- External reading sites can change their DOM, access rules, and rate limits. No tool can guarantee bulk chapter collection from every website.
-- Bookmarklet installation works best on desktop browsers. On iPhone Safari it may require manual bookmark editing and can be restricted.
-- The browser may block automatic downloads not initiated by a direct user gesture; the **Download EPUB again** button is available if that happens.
-- Respect copyright and website terms. A CAPTCHA may be solved by the user on the site, but this project neither automatically solves CAPTCHAs nor bypasses paywalls or restricted chapters.
+```bash
+node scripts/capture-regression.cjs
+```
 
-Independent learning project, not affiliated with any reading provider.
+The **Desktop and mobile reading checks** workflow builds the exact source under review and tests it in Chromium desktop, an Android viewport, and the WebKit engine with an iPhone viewport. It exercises discovery, search fallback, pause/reload/resume, manual links, import, mobile saving, and actual EPUB ZIP/XML/content checks. It keeps screenshots, downloaded books, and test reports as workflow artifacts. WebKit emulation is not a physical iPhone/Apple Books test.
+
+The Pages workflow runs the complete Dart suite and collector regressions before deploying `main` to the existing project URL.
