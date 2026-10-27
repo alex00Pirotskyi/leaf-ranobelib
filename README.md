@@ -99,6 +99,40 @@ Static files:
 - `scripts/browser-smoke.cjs` — real Chromium test of live Pages
 - `flutter_app/web/fixtures/` — original sample chapters for bridge testing
 
+## Verified real-browser results (October 27, 2026)
+
+The live site was tested with headless Chromium, not only static compilation. The
+[successful end-to-end run](https://github.com/alex00Pirotskyi/leaf-ranobelib/actions/runs/40574185038)
+completed **five scenarios**, with three downloadable EPUBs validated as ZIP/EPUB
+archives containing exactly three chapters each:
+
+| Scenario | Verified outcome |
+|---|---|
+| One-click English Wikisource sample | 3 real chapters read and EPUB downloaded, 12,403 bytes |
+| Live browser chapter tab + user-invoked helper | 3 original test chapters captured and EPUB downloaded, 4,534 bytes |
+| No tab connection / isolated browser | 3 original test chapters collected into a valid JSON download |
+| Import that JSON into Leaf | 3-chapter EPUB downloaded, 4,535 bytes |
+| Emulated iPhone Safari UI | Actionable capture setup displayed instead of a stuck 0/N progress bar |
+
+Separate live API probes confirmed actual HTML content and permissive CORS for
+English Wikisource (18,658 bytes), English Wikibooks (40,244 bytes) and Russian
+Wikisource (306,500 bytes). These findings validate the **same Wikimedia adapter**
+across English/Russian providers, not universal access to arbitrary reading sites.
+
+**Not yet verified:** complete chapter capture on RanobeLIB with a real logged-in
+session. Its separate API returned HTTP 403 from DDoS-Guard. Browser security,
+site terms, CAPTCHA pages, JavaScript-rendered content, and CSP/COOP policies may
+prevent the bookmarklet from collecting its pages. No claim of reliable
+one-click RanobeLIB export is made.
+
+### Fallback when the browser severs the tab connection
+
+On desktop, in Leaf choose **Copy capture plan (no tab connection needed)**.
+In the opened source tab run the Leaf Capture bookmarklet, paste that plan into
+its panel, and press **Start using pasted plan**. When complete, it downloads
+JSON. Return to Leaf, select **Import files**, and create EPUB. This fallback
+was successfully exercised in Chromium on the sample chapter site.
+
 ## Tests and deployment
 
 The GitHub Pages workflow runs the EPUB and reading tests, validates the in-page JavaScript syntax, compiles Flutter Web and deploys the artifact under `/leaf-ranobelib/`. The separately runnable live Chromium smoke test attempts one-click Wikisource → EPUB and source-tab capture → EPUB, and inspects the resulting ZIPs. Test outcomes are published in GitHub Actions.
