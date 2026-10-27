@@ -20,6 +20,16 @@ Or, with GitHub CLI installed and logged in, run:
 make github-rename-pages
 ```
 
+**Fastest PowerShell path (GitHub CLI installed and authenticated):**
+
+```powershell
+git pull
+gh auth login
+make publish-pages
+```
+
+The `publish-pages` target renames the existing repository to your GitHub Pages root site, enables `build_type=workflow` through GitHub's Pages API, and dispatches the Flutter build. GitHub CLI requires your account to have Pages administration permissions. No Docker is needed. If you prefer not to rename, run `make pages-enable` instead and use the project-path URL.
+
 This is a **username-site** repository name; keeping the name `leaf-ranobelib` gives the project URL `https://alex00pirotskyi.github.io/leaf-ranobelib/` instead. The Pages workflow supports both cases.
 
 **GitHub Pages on private repositories depends on your plan/permissions.**
