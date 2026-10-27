@@ -60,13 +60,32 @@ async function verifyDownload(download, filename) {
    console.log('Reader tab',popup.url(),'opener?',await popup.evaluate(()=>!!window.opener));
    assert(popup.url()===SITE+'fixtures/chapter-1.html',
      'Wrong tab URL: '+popup.url());
-   const downloadPromise=page.waitForEvent('download',{timeout:90000});
+   await page.evaluate(() => {
+     window.__leafDebugMessages=[];
+     window.addEventListener('message',e=>{
+       try { window.__leafDebugMessages.push({
+         origin:e.origin,data:String(e.data).slice(0,450)
+       }); } catch(_) {}
+     });
+   });
+   popup.on('console',m=>{if(m.type()==='error')console.log('READER CONSOLE',m.text());});
+   popup.on('pageerror',err=>console.log('READER PAGE ERROR',err.message));
+   const downloadPromise=page.waitForEvent('download',{timeout:35000});
    // Simulate a real user clicking the Leaf Capture bookmark on the fixture.
    await popup.evaluate(() => {
      const s=document.createElement('script');
      s.src='https://alex00pirotskyi.github.io/leaf-ranobelib/leaf-capture.js';
      document.head.appendChild(s);
    });
+   await page.waitForTimeout(7000);
+   console.log('CAPTURE HELPER STATE',JSON.stringify(await popup.evaluate(()=>{
+     const host=document.getElementById('leaf-capture-v2');
+     return { loaded:!!window.__leafCaptureV2,
+       panel:host?.shadowRoot?.textContent?.slice(0,1300)||'NONE',
+       opener:!!window.opener };
+   })));
+   console.log('LEAF BRIDGE MESSAGES',JSON.stringify(await page.evaluate(
+     ()=>window.__leafDebugMessages||[])));
    const secondDownload=await downloadPromise;
    await verifyDownload(secondDownload,'bookmarklet_fixture.epub');
    console.log('SCENARIO 2 PASS');
