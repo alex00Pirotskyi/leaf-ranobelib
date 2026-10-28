@@ -29,7 +29,7 @@ const demoEnd =
 const bookmarklet = 'javascript:(function(){'
     'if(window.__leafCaptureV2){window.__leafCaptureV2.resume();return;}'
     'var s=document.createElement("script");'
-    's.src="https://alex00pirotskyi.github.io/leaf-ranobelib/leaf-capture.js";'
+    's.src="https://alex00pirotskyi.github.io/leaf-ranobelib/leaf-capture.js?rev=20261028-reader-quality";'
     '(document.head||document.documentElement).appendChild(s);'
     '})()';
 
@@ -940,7 +940,7 @@ class _LeafHomeState extends State<LeafHome> {
   Future<void> _copySelfContainedCapture() async {
     try {
       final response = await http
-          .get(Uri.base.resolve('leaf-capture.js'))
+          .get(Uri.base.resolve('leaf-capture.js?rev=20261028-reader-quality'))
           .timeout(const Duration(seconds: 12));
       if (response.statusCode != 200) {
         throw FormatException('Cannot load the in-page helper (HTTP ' +
@@ -969,7 +969,7 @@ class _LeafHomeState extends State<LeafHome> {
   Future<void> _loadCaptureSource() async {
     try {
       final response = await http
-          .get(Uri.base.resolve('leaf-capture.js'))
+          .get(Uri.base.resolve('leaf-capture.js?rev=20261028-reader-quality'))
           .timeout(const Duration(seconds: 20));
       if (response.statusCode != 200) return;
       final source = utf8.decode(response.bodyBytes);
