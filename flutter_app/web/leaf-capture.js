@@ -102,66 +102,160 @@
     return (node?.innerText || node?.textContent || '').replace(/\s+/g,' ').trim();
   }
   function visible(node) {
-    if (!node || !node.isConnected) return false;
+    if (!node || node.hasAttribute?.('hidden') ||
+        node.getAttribute?.('aria-hidden') === 'true' ||
+        node.hasAttribute?.('inert')) return false;
+    // DOMParser creates a detached document. Requiring isConnected here
+    // previously discarded every static chapter candidate.
+    const view = node.ownerDocument?.defaultView;
+    if (!view || !node.isConnected) return true;
     try {
-      const cs = node.ownerDocument.defaultView.getComputedStyle(node);
-      if (cs.display === 'none' || cs.visibility === 'hidden') return false;
+      const style = view.getComputedStyle(node);
+      if (style.display === 'none' || style.visibility === 'hidden' ||
+          style.opacity === '0') return false;
     } catch (_) {}
     return true;
   }
+
+  // Reader-first scoring: the longest element on a page is often the whole
+  // application shell. Prefer actual paragraphs inside a chapter container.
+  // Keep this code self-contained so the bookmarklet works without a server.
   function selectContent(doc) {
-    let nodes=[];
+    if (!doc?.body) return null;
+    const known = [
+      ['[data-reader-content] .text-content', 450],
+      ['main[data-reader-content] .text-content', 450],
+      ['[data-reader-content] [class*="chapter"]', 390],
+      ['[data-testid="chapter-content"]', 390],
+      ['#chapter-content', 390],
+      ['.chapter__content', 380],
+      ['.chapter-content', 380],
+      ['.chapter-body', 360],
+      ['.reader__content', 360],
+      ['.reader-content', 350],
+      ['.reading-content', 340],
+      ['.text-content', 310],
+      ['[data-reader-content]', 275],
+      ['.mw-parser-output', 260],
+      ['article [class*="content"]', 245],
+      ['article', 185],
+      ['[role="article"]', 180],
+      ['.prose', 170],
+      ['main', 25],
+      ['body', -140],
+    ];
+    const nodes = new Map();
+    const add = (node, priority, picked = false) => {
+      if (!node || typeof node.cloneNode !== 'function') return;
+      const previous = nodes.get(node);
+      if (!previous || previous.priority < priority) {
+        nodes.set(node, {node, priority, picked});
+      }
+    };
     if (selector) {
-      try {nodes=[...doc.querySelectorAll(selector)];} catch (_) {}
+      try {
+        for (const node of doc.querySelectorAll(selector)) add(node, 900, true);
+      } catch (_) {}
     }
-    if (!nodes.length) {
-      const q = [
-        'main[data-reader-content] .text-content',
-        '[data-reader-content] .text-content',
-        'main[data-reader-content]', '[data-reader-content]',
-        '.text-content',
-        '#chapter-content', '[data-testid="chapter-content"]',
-        '.chapter-content', '.reader-content', '.reading-content',
-        '.chapter__content', '.reader__content', '.chapter-body',
-        '[class*="chapter-content"]', '[class*="reader-content"]',
-        '[class*="chapter__content"]', '[class*="reader__content"]',
-        '.mw-parser-output', '#content', 'article', '[role="article"]',
-        '.prose', 'main'
-      ];
-      for (const name of q) {
-        try {nodes.push(...doc.querySelectorAll(name));} catch (_) {}
+    for (const [query, priority] of known) {
+      try {
+        for (const node of doc.querySelectorAll(query)) {
+          add(node, priority);
+          if (nodes.size >= 170) break;
+        }
+      } catch (_) {}
+      if (nodes.size >= 170) break;
+    }
+    // A browser may provide a minimal body with bare paragraph children.
+    add(doc.body, -140);
+    const noise = [
+      'script','style','noscript','template','svg','canvas','video','audio',
+      'iframe','object','embed','form','button','input','select','textarea',
+      'nav','header','footer','aside','dialog',
+      '[hidden]','[inert]','[aria-hidden="true"]','[role="navigation"]',
+      '[role="toolbar"]','[role="dialog"]',
+      '#leaf-capture-v2','.comments','.comment-list','.advertisement','.ads',
+      '.navbox','.sidebar','.breadcrumbs','.breadcrumb','.pagination',
+      '.reader-settings','.chapter-navigation','.chapter-pagination',
+      '.chapter-controls','.reader-controls','.reader-toolbar',
+      '.recommendations','.related-books',
+      '[class*="comment-section"]','[class*="share-buttons"]',
+      '[class*="advertisement"]','[class*="chapter-list"]',
+      '[class*="sidebar"]','[class*="pagination"]',
+    ].join(',');
+    let best = null, bestScore = -Infinity;
+    for (const {node, priority, picked} of nodes.values()) {
+      if (!visible(node) || node.closest?.('#leaf-capture-v2')) continue;
+      // A navigation or menu container is not a chapter even if its name
+      // contains the generic word "content".
+      const identity = ((node.id || '') + ' ' +
+        (typeof node.className === 'string' ? node.className : '')).toLowerCase();
+      if (!picked && /(^|[\s_-])(menu|sidebar|comment|nav|related|recommend|footer|toolbar|pagination|chapters-list)([\s_-]|$)/.test(identity)) continue;
+      const clone = node.cloneNode(true);
+      try {
+        for (const unwanted of clone.querySelectorAll(noise)) unwanted.remove();
+      } catch (_) {}
+      const plain = text(clone);
+      if (plain.length < MIN_TEXT) continue;
+      const html = clone.innerHTML || '';
+      if (html.length > MAX_HTML) {
+        // Only raise for the strongest plausible chapter candidate, not a
+        // bloated BODY wrapper full of unrelated page data.
+        if (picked || priority >= 275) {
+          throw Error('This chapter exceeds the safe capture size. Nothing was truncated. Save this chapter manually and import the complete file.');
+        }
+        continue;
+      }
+      const links = clone.querySelectorAll?.('a') || [];
+      let linkText = 0;
+      for (const anchor of links) linkText += text(anchor).length;
+      const linkRatio = linkText / Math.max(1, plain.length);
+      if (!picked && linkRatio > 0.28) continue;
+      const paragraphs = [...(clone.querySelectorAll?.('p,li,blockquote,pre') || [])];
+      let prose = 0, substantial = 0;
+      for (const part of paragraphs) {
+        const length = text(part).length;
+        if (length < 36) continue;
+        substantial++;
+        prose += length;
+      }
+      // A long list of book links is not long-form prose. For flat-reader
+      // implementations (nested div/span rather than <p>), allow a strong
+      // reader-specific selector with meaningful text.
+      const strongReader = picked || priority >= 260;
+      const textOnly = substantial === 0 && plain.length >= 350 && strongReader &&
+        linkRatio < 0.07;
+      if (!picked && !textOnly && substantial === 0) continue;
+      if (!picked && priority < 180 &&
+          (substantial < 2 || prose < 170)) continue;
+      const coverage = prose / Math.max(1,plain.length);
+      const score = priority +
+        Math.min(90, plain.length / 24) +
+        Math.min(80, substantial * 10) +
+        Math.min(45, coverage * 45) -
+        linkRatio * 430 -
+        (priority < 0 ? 45 : 0);
+      if (score > bestScore) {
+        bestScore = score;
+        // Prefer a chapter heading INSIDE the reading body rather than the
+        // site's generic h1/logo. Some sites reuse document.title for all pages.
+        const insideTitle = node.querySelector?.(
+          '[data-chapter-title],.chapter-title,[class*="chapter__title"],h1,h2');
+        const outsideTitle = doc.querySelector?.(
+          '[data-chapter-title],.chapter-title,[class*="chapter__title"]');
+        const titleNode = insideTitle || outsideTitle || doc.querySelector?.('h1');
+        const fallback = decodeURIComponent(
+          (doc.location?.pathname || location.pathname).split('/').pop() || 'Chapter');
+        const title = (text(titleNode).slice(0,190) ||
+          doc.title || fallback || 'Chapter').trim();
+        best = {
+          title, html, plain, quality: score, paragraphCount: substantial,
+          sourceSelector: picked ? selector :
+            (priority >= 260 ? 'reader' : priority >= 170 ? 'article' : 'generic'),
+        };
       }
     }
-    if (!nodes.length) nodes=[doc.body];
-    const unique=[...new Set(nodes)].filter(Boolean);
-    let best=null, bestScore=0;
-    for (const node of unique) {
-      if (!visible(node) || node.closest('#leaf-capture-v2')) continue;
-      const content=text(node);
-      if (content.length < MIN_TEXT) continue;
-      const links=[...node.querySelectorAll('a')].reduce((n,a)=>n+text(a).length,0);
-      const ratio=links/Math.max(1,content.length);
-      const paragraphCount=node.querySelectorAll('p').length;
-      const score=content.length*(1-Math.min(ratio,.9))+
-        Math.min(paragraphCount,100)*14-
-        (node.tagName==='BODY'?700:0);
-      if (score>bestScore){best=node;bestScore=score;}
-    }
-    if (!best) return null;
-    const titleNode=doc.querySelector('.chapter-title') ||
-      doc.querySelector('[class*="chapter-title"]') || doc.querySelector('h1');
-    const title=(text(titleNode).slice(0,190) || doc.title || 'Chapter').trim();
-    const clone=best.cloneNode(true);
-    for (const target of clone.querySelectorAll('script,style,iframe,form,button,nav,header,footer,aside,svg,video,canvas,[role="navigation"],.comments,.advertisement,.ads')) {
-      target.remove();
-    }
-    const html=clone.innerHTML;
-    const plain=text(clone);
-    if (html.length > MAX_HTML) {
-      throw Error('This chapter exceeds the safe capture size. Nothing was truncated. Save this chapter manually and import the complete file.');
-    }
-    if (plain.length<MIN_TEXT) return null;
-    return {title,html,plain};
+    return best;
   }
 
   function challenge(doc) {
