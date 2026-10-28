@@ -19,6 +19,7 @@
   let job = null, stopped = false, busy = false, picker = false, selector = '';
   let index = 0, currentUrl = location.href, captured = [], completed = false;
   let visited = new Set(), contentSignatures = new Set();
+  let pendingDuplicate = null, allowDuplicateOnce = '';
   const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
   const same = url => {
     try { const u = new URL(url, location.href); return u.protocol === 'https:' && u.origin === location.origin; }
@@ -55,9 +56,30 @@
   }
   const pauseBtn = button('Pause', () => {stopped=true; status('Paused after ' + index + ' chapters.');});
   const resumeBtn = button('Resume', () => {stopped=false; if(job&&!busy) void run();});
-  const pickBtn = button('Pick text area', () => {
-    picker=true; status('Click the main chapter text on this page.');
+  button('Pick text area', () => {
+    picker = true;
+    status('Click a paragraph INSIDE the chapter, not the book menu.');
   });
+  button('Preview text', () => {
+    const result = selectContent(document);
+    if (!result) {
+      status('No readable chapter detected on this page. Navigate to a chapter and try Pick text area.');
+      return;
+    }
+    status('Selected ' + result.sourceSelector + ': ' +
+      result.plain.length + ' characters, ' + result.paragraphCount +
+      ' paragraphs. ' + result.title + '\nPreview: ' +
+      result.plain.slice(0, 180));
+  });
+  const duplicateButton = button('Keep duplicate once', () => {
+    if (!pendingDuplicate || busy) return;
+    allowDuplicateOnce = pendingDuplicate.url;
+    stopped = false;
+    duplicateButton.style.display = 'none';
+    status('Including this repeated chapter because you approved it.');
+    void run();
+  });
+  duplicateButton.style.display = 'none';
   button('Export JSON', downloadJson);
   button('Close', () => {
     stopped = true; host.remove(); window.__leafCaptureV2=null;
@@ -272,13 +294,36 @@
     const cls=[...el.classList].filter(c=>/^[\w-]{3,}$/.test(c)).slice(0,2);
     return el.tagName.toLowerCase() + (cls.length?'.'+cls.join('.'):'');
   }
-  document.addEventListener('click',e=>{
-    if(!picker || e.target.closest?.('#leaf-capture-v2')) return;
-    picker=false; e.preventDefault(); e.stopPropagation();
-    const node=e.target.closest('article,main,[class*="chapter"],[class*="reader"],.mw-parser-output')||e.target.parentElement;
-    selector=selectorFor(node);
-    status('Selected '+selector+'. Press Resume to try collection.');
-  },true);
+  document.addEventListener('click', event => {
+    if (!picker || event.target.closest?.('#leaf-capture-v2')) return;
+    picker = false;
+    event.preventDefault();
+    event.stopPropagation();
+    let node = event.target;
+    // Climb from a paragraph to its most specific reading container, not
+    // straight to a broad MAIN element with menus and toolbars.
+    while (node?.parentElement && node.tagName !== 'BODY') {
+      const identity = ((node.id || '') + ' ' +
+        (typeof node.className === 'string' ? node.className : '')).toLowerCase();
+      if (/chapter.*content|reader.*content|text-content|chapter-body/.test(identity) ||
+          node.hasAttribute?.('data-reader-content') ||
+          node.tagName === 'ARTICLE') break;
+      if (node.parentElement.tagName === 'MAIN' ||
+          node.parentElement.tagName === 'BODY') break;
+      node = node.parentElement;
+    }
+    if (!node) {status('Unable to select text.'); return;}
+    selector = selectorFor(node);
+    const result = selectContent(document);
+    // A preview lets the user immediately see if the chosen area is a menu.
+    if (result) {
+      status('Selected ' + selector + ' — ' + result.plain.length +
+        ' characters. Preview: ' + result.plain.slice(0, 170) +
+        '. Click Resume to retry the chapter.');
+    } else {
+      status('Selected ' + selector + ', but there is not enough readable prose. Choose a paragraph inside the actual chapter.');
+    }
+  }, true);
 
   async function loadFrame(url, excluded = contentSignatures) {
     if (!same(url)) throw Error('Refusing a different website.');
@@ -417,15 +462,32 @@
         if(!url) throw Error('The chapter list ended before the requested final page.');
         if(!same(url)) throw Error('A chapter URL points to another website.');
         if(visited.has(normalize(url))) throw Error('This page was already collected. Stopped to avoid a chapter loop.');
-        status('Reading '+(index+1)+' / '+(job.urls?.length||max)+'…');
-        const {doc,result}=await fetchChapter(url);
-        if(stopped)break;
-        const plain=result.plain.replace(/\s+/g,' ').trim();
-        const signature=await contentSignature(plain);
-        if(stopped)break;
-        if(contentSignatures.has(signature))
-          throw Error('Repeated chapter content detected; stopped to avoid an incorrect EPUB.');
-        const payload={type:'chapter',token:job.token,index,url:normalize(url),title:result.title,html:result.html};
+        status('Reading ' + (index + 1) + ' / ' +
+          (job.urls?.length || max) + '…');
+        const normalizedUrl = normalize(url);
+        const approved = pendingDuplicate?.url === normalizedUrl &&
+          allowDuplicateOnce === normalizedUrl;
+        const {doc, result} = approved ? pendingDuplicate : await fetchChapter(url);
+        if (stopped) break;
+        const plain = result.plain.replace(/\s+/g, ' ').trim();
+        const signature = await contentSignature(plain);
+        if (stopped) break;
+        if (contentSignatures.has(signature) && !approved) {
+          pendingDuplicate = {url: normalizedUrl, doc, result};
+          duplicateButton.style.display = 'inline-block';
+          throw Error('Chapter ' + (index + 1) + ' returned identical book text ' +
+            'even after checking the rendered page. Nothing was lost. Open ' +
+            'that chapter, use Preview text or Pick text area, then Resume. ' +
+            'If the author intentionally repeated the text, choose Keep ' +
+            'duplicate once.');
+        }
+        const payload = {
+          type: 'chapter', token: job.token, index,
+          url: normalizedUrl, title: result.title, html: result.html,
+        };
+        // Once a reader page is accepted, clear any one-off duplicate override.
+        pendingDuplicate = null; allowDuplicateOnce = '';
+        duplicateButton.style.display = 'none';
         captured.push({...payload,signature});
         contentSignatures.add(signature);
         visited.add(payload.url);
@@ -487,6 +549,11 @@
       sameJob ? captured.find(chapter=>chapter.index===resumeFrom)?.url : null;
     if(!sameJob)captured=[];
     else captured=captured.filter(chapter=>chapter.index<resumeFrom);
+    if (!sameJob || resumeFrom !== index) {
+      pendingDuplicate = null;
+      allowDuplicateOnce = '';
+      duplicateButton.style.display = 'none';
+    }
     visited=new Set(captured.map(chapter=>chapter.url));
     contentSignatures=new Set(captured.map(chapter=>chapter.signature));
     job=data;currentUrl=retainedCurrent||job.start;index=resumeFrom;completed=false;
