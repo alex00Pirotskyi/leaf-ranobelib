@@ -22,7 +22,13 @@
   let pendingDuplicate = null, allowDuplicateOnce = '';
   const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
   const same = url => {
-    try { const u = new URL(url, location.href); return u.protocol === 'https:' && u.origin === location.origin; }
+    try {
+      const u = new URL(url, location.href);
+      const local = location.protocol === 'http:' &&
+        /^(?:localhost|127\.0\.0\.1|\[::1\])$/i.test(location.hostname);
+      return u.origin === location.origin &&
+        (u.protocol === 'https:' || (local && u.protocol === 'http:'));
+    }
     catch (_) { return false; }
   };
   const normalize = url => {
