@@ -280,53 +280,96 @@
     status('Selected '+selector+'. Press Resume to try collection.');
   },true);
 
-  async function loadFrame(url) {
+  async function loadFrame(url, excluded = contentSignatures) {
     if (!same(url)) throw Error('Refusing a different website.');
-    const iframe=document.createElement('iframe');
-    iframe.style.cssText='position:fixed;left:-10000px;top:0;width:500px;height:600px;opacity:0;pointer-events:none';
-    iframe.setAttribute('aria-hidden','true');
+    const iframe = document.createElement('iframe');
+    iframe.style.cssText = 'position:fixed;left:-10000px;top:0;width:500px;height:650px;opacity:0;pointer-events:none';
+    iframe.setAttribute('aria-hidden', 'true');
     document.body.appendChild(iframe);
     try {
-      iframe.src=url;
-      const deadline=Date.now()+WAIT_RENDER_MS;
-      while(Date.now()<deadline && !stopped){
-        await sleep(450);
+      iframe.src = url;
+      const deadline = Date.now() + WAIT_RENDER_MS;
+      let previous = '', stable = 0;
+      while (Date.now() < deadline && !stopped) {
+        await sleep(480);
         let doc;
-        try {doc=iframe.contentDocument;} catch (_) {return null;}
-        if (!doc || !doc.body) continue;
-        if (challenge(doc)) throw Error('Challenge on source page. Open that page manually, solve it, then resume.');
-        const result=selectContent(doc);
-        if(result) return {doc,result};
+        try { doc = iframe.contentDocument; } catch (_) { return null; }
+        if (!doc?.body) continue;
+        if (challenge(doc)) {
+          throw Error('The site requested verification. Open this chapter in its own tab and solve it manually, then resume.');
+        }
+        const result = selectContent(doc);
+        if (!result) continue;
+        const digest = await contentSignature(result.plain.replace(/\s+/g, ' ').trim());
+        if (excluded.has(digest)) {
+          // A JavaScript reader often displays its last chapter while loading
+          // the next one. Do not package the stale text or stop immediately.
+          previous = ''; stable = 0;
+          continue;
+        }
+        stable = digest === previous ? stable + 1 : 0;
+        previous = digest;
+        // Require two identical snapshots, rather than grabbing a partially
+        // rendered chapter immediately after an iframe load event.
+        if (stable >= 1) return {doc, result, mode: 'rendered'};
       }
       return null;
-    } finally {iframe.remove();}
+    } finally { iframe.remove(); }
   }
 
   async function fetchChapter(url) {
     if (!same(url)) throw Error('Refusing cross-origin navigation.');
-    const normalized=normalize(url);
-    if (normalized===normalize(location.href)) {
-      if (challenge(document)) throw Error('Solve the site challenge in this tab, then press Resume.');
-      const live=selectContent(document);
-      if (live) return {result:live,doc:document};
+    const normalized = normalize(url);
+    if (normalized === normalize(location.href)) {
+      if (challenge(document)) {
+        throw Error('Solve the site challenge in this tab, then press Resume.');
+      }
+      const live = selectContent(document);
+      if (live) return {result: live, doc: document, mode: 'visible'};
     }
-    let resp;
+
+    let response;
     try {
-      resp=await fetch(normalized,{credentials:'same-origin',redirect:'follow',cache:'default',headers:{Accept:'text/html'}});
-    } catch (err) {throw Error('Page cannot be loaded: '+err);}
-    if(!same(resp.url)) throw Error('Page redirected off the original website.');
-    if(resp.status===401||resp.status===403||resp.status===429)
-      throw Error('Source blocked the request (HTTP '+resp.status+'). Open the page in this tab and resolve it manually. The helper does not bypass restrictions.');
-    if(!resp.ok) throw Error('Cannot read page (HTTP '+resp.status+').');
-    const html=await resp.text();
-    if(html.length>3000000) throw Error('Page is unexpectedly large. Stopped.');
-    const doc=new DOMParser().parseFromString(html,'text/html');
-    if(challenge(doc)) throw Error('Source returned a verification page. Resolve it manually and resume.');
-    let result=selectContent(doc);
-    if(result) return {doc,result};
-    const frame=await loadFrame(normalized);
-    if(frame) return frame;
-    throw Error('Chapter text not found. This may be a JavaScript reader. Open the page and try Pick text area, or capture one page manually.');
+      response = await fetch(normalized, {
+        credentials: 'same-origin', redirect: 'follow', cache: 'no-cache',
+        headers: {Accept: 'text/html'},
+      });
+    } catch (error) {
+      throw Error('Page cannot be loaded: ' + error);
+    }
+    if (!same(response.url)) throw Error('Page redirected off the original website.');
+    if (response.status === 401 || response.status === 403 || response.status === 429) {
+      throw Error('The website blocked this chapter (HTTP ' + response.status +
+        '). Open it manually and follow its access rules before resuming.');
+    }
+    if (!response.ok) throw Error('Cannot read chapter (HTTP ' + response.status + ').');
+    const html = await response.text();
+    if (html.length > 3000000) throw Error('Page is unexpectedly large. Stopped.');
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+    if (challenge(doc)) {
+      throw Error('The site returned a verification page. Open this chapter and solve its challenge manually.');
+    }
+    const result = selectContent(doc);
+    let repeated = false;
+    if (result) {
+      const signature = await contentSignature(result.plain.replace(/\s+/g, ' ').trim());
+      repeated = contentSignatures.has(signature);
+      if (!repeated) return {doc, result, mode: 'html'};
+    }
+    // HTML may contain only the generic application shell. Retry through the
+    // real site's own JavaScript-rendered DOM. This is also used when the
+    // returned chapter matches the previously collected text.
+    status(repeated
+      ? 'Same text received — checking the actual rendered reader…'
+      : 'Waiting for the chapter text to render…');
+    const rendered = await loadFrame(normalized, contentSignatures);
+    if (rendered) return rendered;
+    // Keep the candidate so the user can inspect or explicitly accept a
+    // legitimate repeated chapter; do not silently discard it.
+    if (result) return {doc, result, mode: 'unresolved-repeat'};
+    throw Error('No readable chapter body was found at this URL. The site may ' +
+      'require its interactive reader. Open the page, use Preview text or ' +
+      'Pick text area, then resume; your earlier chapters are preserved.');
   }
 
   function findNext(doc, url) {
