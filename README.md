@@ -67,6 +67,37 @@ Desktop capture and the personalized iPhone Safari bookmark remain experimental.
 
 **RanobeLIB authenticated full-book capture remains unverified.** Do not advertise universal one-click downloads from arbitrary sites.
 
+### Chapter text extraction and duplicate recovery (October 28, 2026)
+
+The optional **Leaf Capture** bookmarklet now selects reader/chapter prose first
+instead of choosing the longest HTML container. It removes navigation, related
+books, settings, comments, advertising and toolbars before scoring candidate
+regions. It also recognizes RanobeLIB-style
+`[data-reader-content] .text-content` markup when the accessible reading page
+actually contains that element.
+
+If the static HTML serves yesterday's chapter or a shared application shell,
+Leaf checks the site's rendered page and waits for stable **new** text before
+accepting the chapter. If a real duplicate is still found, the collector keeps
+previous chapters and offers:
+
+- **Preview text** — inspect the detected title, paragraph count and sample
+  prose; verify it is not the site's menu.
+- **Pick text area** — click inside the actual novel text, then **Resume**.
+- **Keep duplicate once** — only when you confirm the chapter intentionally
+  repeats the previous text. There is no silent skipping or false completion.
+
+**After updating:** refresh Leaf, replace any old *self-contained* bookmarklet,
+and reload the source chapter tab before retrying. The regular bookmarklet now
+uses a versioned script URL to avoid stale browser caching. Running an older
+in-page helper in an already-open tab does not magically update that tab.
+
+The [desktop/mobile GitHub Actions suite](https://github.com/alex00Pirotskyi/leaf-ranobelib/actions/runs/40639956369)
+verified 17 collector regressions and a real Chromium test of three noisy
+chapter pages, including identical site boilerplate and a second chapter that
+only becomes unique after JavaScript hydration. RanobeLIB authenticated
+full-book collection itself remains unverified.
+
 ## EPUB quality
 
 The Dart builder creates EPUB 3 with the correct source language, a unique identifier, actual UTC modification time, and consistent navigation/spine metadata. Sanitized XHTML preserves paragraphs, emphasis, lists, quotations, tables, superscripts and preformatted text. External images are represented by placeholders; cover art and original page styling are not bundled.
