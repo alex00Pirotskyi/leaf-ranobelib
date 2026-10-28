@@ -73,13 +73,14 @@ test('actual Dart-generated desktop and Safari bookmarklets compile', () => {
 
 test('collector only permits HTTPS sites or same-origin local development', () => {
   const production = harness().context;
-  assert.equal(production.same('https://reader.example/chapter/two'), true);
-  assert.equal(production.same('http://reader.example/chapter/two'), false);
-  assert.equal(production.same('https://another.example/chapter/two'), false);
+  const check = (context, url) => vm.runInContext('same(' + JSON.stringify(url) + ')', context);
+  assert.equal(check(production, 'https://reader.example/chapter/two'), true);
+  assert.equal(check(production, 'http://reader.example/chapter/two'), false);
+  assert.equal(check(production, 'https://another.example/chapter/two'), false);
   const local = harness({location: new URL('http://127.0.0.1:8765/chapter/one')}).context;
-  assert.equal(local.same('http://127.0.0.1:8765/chapter/two'), true);
-  assert.equal(local.same('http://127.0.0.1:7777/chapter/two'), false);
-  assert.equal(local.same('http://attacker.example/chapter/two'), false);
+  assert.equal(check(local, 'http://127.0.0.1:8765/chapter/two'), true);
+  assert.equal(check(local, 'http://127.0.0.1:7777/chapter/two'), false);
+  assert.equal(check(local, 'http://attacker.example/chapter/two'), false);
 });
 
 test('Next navigation ignores chapter menu and previous links', () => {
