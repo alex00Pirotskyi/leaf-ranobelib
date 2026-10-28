@@ -38,6 +38,8 @@ function harness(extra = {}) {
     sessionToken: 'session', LEAF_ORIGIN: 'https://alex00pirotskyi.github.io',
     job: null, index: 0, currentUrl: sourceUrl, captured: [], completed: false,
     busy: false, stopped: false, visited: new Set(), contentSignatures: new Set(),
+    pendingDuplicate: null, allowDuplicateOnce: '',
+    duplicateButton: {style: {display: 'none'}},
     offlineJob: null, window: {opener: {}},
     sleep: async () => {}, send: payload => sent.push(payload),
     status: message => notes.push(message), downloadJson: () => {},
@@ -136,7 +138,29 @@ test('duplicate chapter text fails without reporting a complete book', async () 
   assert.equal(context.index, 1);
   assert.equal(context.completed, false);
   assert.equal(sent.some(item => item.type === 'done'), false);
-  assert.match(sent.find(item => item.type === 'halt').note, /Repeated chapter/);
+  assert.match(sent.find(item => item.type === 'halt').note, /identical book text/);
+  assert.equal(context.duplicateButton.style.display, 'inline-block');
+  assert.equal(context.pendingDuplicate.url, second);
+});
+
+
+test('explicit approval allows an intentional duplicate once, without hiding later duplicates', async () => {
+  const {context, sent} = harness({fetchChapter: async url =>
+    response(url, [], 'The same chapter text, deliberately repeated by the author. '.repeat(15))});
+  context.job = {token: 'session', start: first, end: last,
+    urls: [first, second, last], max: 3};
+  await context.run();
+  assert.equal(context.index, 1);
+  assert.equal(context.pendingDuplicate.url, second);
+  context.allowDuplicateOnce = second;
+  await context.run();
+  assert.equal(context.index, 2);
+  assert.equal(context.pendingDuplicate.url, last);
+  context.allowDuplicateOnce = last;
+  await context.run();
+  assert.equal(context.index, 3);
+  assert.equal(context.completed, true);
+  assert.equal(sent.filter(item => item.type === 'chapter').length, 3);
 });
 
 test('an opaque URL loop cannot produce a false successful EPUB', async () => {
@@ -233,7 +257,7 @@ test('oversize chapters halt and are never silently shortened', () => {
     querySelectorAll: () => []};
   const node = {textContent: clone.textContent, tagName: 'ARTICLE', isConnected: true,
     closest: () => null, querySelectorAll: () => [], cloneNode: () => clone};
-  const doc = {querySelectorAll: () => [node], querySelector: () => null, title: 'Chapter'};
+  const doc = {body: node, querySelectorAll: () => [node], querySelector: () => null, title: 'Chapter'};
   const {context} = harness({selector: '', visible: () => true});
   vm.runInContext(section('  function selectContent(', '  function challenge('), context);
   assert.throws(() => context.selectContent(doc), /Nothing was truncated/);
