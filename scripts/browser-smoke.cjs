@@ -392,6 +392,52 @@ async function mobileFlow(browser, label, device) {
       });
     });
 
+    await scenario('Reader-only extraction ignores repeated site chrome and waits for hydrated chapters', async () => {
+      const state = await newPage(chrome, 'noisy-reader-quality');
+      const prefix = SITE + 'fixtures/chapter-quality-';
+      await state.page.goto(prefix + '1.html', {waitUntil:'domcontentloaded'});
+      const job = {
+        leaf:2, type:'job', token:'quality-e2e-reader',
+        start:prefix+'1.html', end:prefix+'3.html',
+        urls:[1,2,3].map(n=>prefix+n+'.html'),
+        max:3, title:'A Novel without its website chrome',
+        resumeFrom:0, manualMode:true,
+      };
+      const pending = state.page.waitForEvent('download', {timeout:65000});
+      await state.page.evaluate(({scriptUrl, job}) => {
+        window.__leafOfflineJobV2 = job;
+        const element=document.createElement('script');
+        element.src=scriptUrl;
+        document.head.appendChild(element);
+      }, {scriptUrl:SITE+'leaf-capture.js', job});
+      const download=await pending;
+      const saved=path.join(OUT,'noisy-reader-extraction.json');
+      await download.saveAs(saved);
+      const data=JSON.parse(fs.readFileSync(saved,'utf8'));
+      assert(data.complete===true, 'Noisy reader did not complete all pages.');
+      assert(data.chapters.length===3, 'Expected three unique, complete novel chapters.');
+      const markers=['unique chapter one prose','unique chapter two prose',
+        'unique chapter three prose'];
+      for (let i=0;i<3;i++){
+        const chapter=data.chapters[i];
+        assert(chapter.html.includes(markers[i]),
+          'Chapter '+(i+1)+' does not contain the unique novel body.');
+        assert(chapter.title.startsWith('Chapter '+(i+1)),
+          'The extracted chapter title came from website chrome: '+chapter.title);
+        for (const unwanted of ['Recommended title','Browse books and reader settings',
+          'Font size','Open app settings','Review this book',
+          'Read exciting books in our catalogue']){
+          assert(!chapter.html.includes(unwanted),
+            'Website boilerplate was included as chapter text: '+unwanted);
+        }
+      }
+      assert(!data.chapters[1].html.includes('unique chapter one prose'),
+        'JavaScript hydration failed: chapter two still contains stale chapter one content.');
+      return {pages:3, hydrated:true, boilerplateExcluded:true,
+        firstChapterLength:data.chapters[0].html.length,
+        secondChapterLength:data.chapters[1].html.length};
+    });
+
     await scenario('Local JSON import uses file chooser and creates a validated EPUB', async () => {
       await openHome(desktop.page);
       await clickLabel(desktop.page, 'Import files');
